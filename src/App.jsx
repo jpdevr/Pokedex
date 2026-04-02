@@ -3,6 +3,7 @@ import bagCloseSprite from './assets/bagClose.png';
 import bagLeftOpenSprite from './assets/BagLeftopen.png';
 import bagRightOpenSprite from './assets/BagRightopen.png';
 import bagUpOpenSprite from './assets/BagUpopen.png';
+import buttonSfx from './assets/ButtonSFX.ogg';
 import mapCloseSprite from './assets/MapClose.png';
 import mapOpenLeftSprite from './assets/MapOpenleft.png';
 import mapOpenRightSprite from './assets/MapOpenright.png';
@@ -103,6 +104,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isBagOpen, setIsBagOpen] = useState(false);
   const [activeBagMenu, setActiveBagMenu] = useState('key-items');
+  const [bagShake, setBagShake] = useState({ tick: 0, direction: 'right' });
   const [mapPopupPhase, setMapPopupPhase] = useState('closed');
   const [bagData, setBagData] = useState(() => ({
     items: { ...INITIAL_BAG_MENU_STATE },
@@ -285,6 +287,7 @@ function App() {
   }, [selectedPokemonDetailState]);
 
   function handleSelectPokemon(id) {
+    playButtonSfx();
     setSelectedPokemonId(id);
 
     const cachedDetail = pokemonDetailCache[id];
@@ -294,6 +297,12 @@ function App() {
   }
 
   function handleBagNavigate(direction) {
+    playButtonSfx();
+    setBagShake((current) => ({
+      tick: current.tick + 1,
+      direction,
+    }));
+
     setActiveBagMenu((current) => {
       const currentIndex = BAG_MENUS.findIndex((menu) => menu.id === current);
       const safeIndex = currentIndex >= 0 ? currentIndex : 1;
@@ -312,9 +321,19 @@ function App() {
       <ItemBag
         activeMenu={activeBagMenuData}
         isOpen={isBagOpen}
-        onToggle={() => setIsBagOpen((current) => !current)}
+        shakeTick={bagShake.tick}
+        shakeDirection={bagShake.direction}
+        onToggle={() => {
+          playButtonSfx();
+          setIsBagOpen((current) => !current);
+        }}
       />
-      <WorldMapButton onClick={() => setMapPopupPhase('opening')} />
+      <WorldMapButton
+        onClick={() => {
+          playButtonSfx();
+          setMapPopupPhase('opening');
+        }}
+      />
       <main className="app-container">
         <section id="regioes" className="pokedex-shell">
           <div className="pokedex-main">
@@ -385,6 +404,14 @@ function App() {
             </div>
           </div>
 
+          <div className="pokedex-hinge" aria-hidden="true">
+            <span className="pokedex-hinge-cap pokedex-hinge-cap-top" />
+            <span className="pokedex-hinge-slot pokedex-hinge-slot-top" />
+            <span className="pokedex-hinge-core" />
+            <span className="pokedex-hinge-slot pokedex-hinge-slot-bottom" />
+            <span className="pokedex-hinge-cap pokedex-hinge-cap-bottom" />
+          </div>
+
           <aside className="pokedex-side">
             <div className="detail-screen">
               <PokedexDetailPanel
@@ -395,27 +422,27 @@ function App() {
             </div>
 
             <div className="detail-button-grid" role="tablist" aria-label="Geracoes">
-              {generationMeta.map((generation, index) => (
+                {generationMeta.map((generation) => (
                 <button
                   key={generation.id}
                   type="button"
                   className={
                     generation.id === selectedGeneration
-                      ? index === generationMeta.length - 1
-                        ? 'detail-button-tile detail-button-tile-circle active'
-                        : 'detail-button-tile active'
-                      : index === generationMeta.length - 1
-                        ? 'detail-button-tile detail-button-tile-circle'
-                        : 'detail-button-tile'
+                      ? 'detail-button-tile active'
+                      : 'detail-button-tile'
                   }
-                  onClick={() => setSelectedGeneration(generation.id)}
+                  onClick={() => {
+                    playButtonSfx();
+                    setSelectedGeneration(generation.id);
+                  }}
                   role="tab"
                   aria-selected={generation.id === selectedGeneration}
                   aria-label={`Selecionar ${generation.label}`}
                 >
                   <span>{generation.label}</span>
                 </button>
-              ))}
+                ))}
+              <div className="detail-button-circle" aria-hidden="true" />
             </div>
           </aside>
         </section>
@@ -476,6 +503,7 @@ function App() {
           canGoRight={activeBagMenuIndex < BAG_MENUS.length - 1}
           onNavigate={handleBagNavigate}
           onSelectInventoryItem={(itemId) => {
+            playButtonSfx();
             setBagData((current) => ({
               ...current,
               [activeBagMenu]: {
@@ -485,6 +513,7 @@ function App() {
             }));
           }}
           onClose={() => {
+            playButtonSfx();
             setIsBagOpen(false);
             setActiveBagMenu('key-items');
           }}
@@ -496,29 +525,32 @@ function App() {
           phase={mapPopupPhase}
           onOpenComplete={() => setMapPopupPhase('open')}
           onCloseComplete={() => setMapPopupPhase('closed')}
-          onRequestClose={() => setMapPopupPhase('closing')}
+          onRequestClose={() => {
+            playButtonSfx();
+            setMapPopupPhase('closing');
+          }}
         />
       ) : null}
     </div>
   );
 }
 
-function ItemBag({ activeMenu, isOpen, onToggle }) {
-  const [animateSprite, setAnimateSprite] = useState(false);
+function ItemBag({ activeMenu, isOpen, shakeTick, shakeDirection, onToggle }) {
+  const [shakeClass, setShakeClass] = useState('');
 
   useEffect(() => {
     if (!isOpen) {
-      setAnimateSprite(false);
+      setShakeClass('');
       return undefined;
     }
 
-    setAnimateSprite(true);
+    setShakeClass(shakeDirection === 'left' ? 'shake-left' : 'shake-right');
     const timeoutId = window.setTimeout(() => {
-      setAnimateSprite(false);
+      setShakeClass('');
     }, 420);
 
     return () => window.clearTimeout(timeoutId);
-  }, [activeMenu.id, isOpen]);
+  }, [isOpen, shakeDirection, shakeTick]);
 
   return (
     <button
@@ -526,7 +558,7 @@ function ItemBag({ activeMenu, isOpen, onToggle }) {
       className={[
         'item-bag',
         isOpen ? 'is-open' : '',
-        animateSprite ? 'is-animating' : '',
+        shakeClass,
       ]
         .filter(Boolean)
         .join(' ')}
@@ -710,24 +742,21 @@ function BagInventoryPanel({ activeMenu, inventoryState, selectedItem, onSelectI
   return (
     <div className={`bag-panel-card bag-panel-card-${activeMenu.id} bag-panel-card-list`}>
       <div className="bag-panel-preview bag-panel-preview-item">
-        <div className="bag-item-preview-copy">
-          <strong>{selectedItem?.displayName ?? menuLabel}</strong>
-          <p>
-            {selectedItem?.description ??
-              `Selecione um ${menuLabel.toLowerCase()} para ver os detalhes completos.`}
-          </p>
+        <div className="bag-preview-sidebar">
+          <span className="bag-preview-rail" aria-hidden="true" />
+          <strong className="bag-preview-title">{selectedItem?.displayName ?? menuLabel}</strong>
+          {selectedItem?.sprite ? (
+            <img
+              src={selectedItem.sprite}
+              alt={selectedItem.displayName}
+              className="bag-item-preview-image pixel-art"
+            />
+          ) : null}
+          <span className="bag-preview-shadow" aria-hidden="true" />
         </div>
 
-        {selectedItem?.sprite ? (
-          <img
-            src={selectedItem.sprite}
-            alt={selectedItem.displayName}
-            className="bag-item-preview-image pixel-art"
-          />
-        ) : null}
-      </div>
-
-      <div className="bag-panel-content">
+        <div className="bag-preview-main">
+          <div className="bag-panel-content">
         {inventoryState.status === 'loading' ? (
           <div className="bag-panel-empty">
             <div className="spinner" />
@@ -756,6 +785,16 @@ function BagInventoryPanel({ activeMenu, inventoryState, selectedItem, onSelectI
             ))}
           </div>
         ) : null}
+          </div>
+
+          <div className="bag-item-preview-copy">
+            <strong>Descricao</strong>
+            <p>
+              {selectedItem?.description ??
+                `Selecione um ${menuLabel.toLowerCase()} para ver os detalhes completos.`}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -823,17 +862,17 @@ function PokedexDetailPanel({ pokemon, detailState, currentGeneration }) {
             <strong>{detail?.weightLabel ?? '--'}</strong>
           </div>
         </div>
+
+        <div className="detail-abilities">
+          <span>Habilidades</span>
+          <strong>{detail?.abilities?.join(', ') ?? 'Carregando...'}</strong>
+        </div>
       </div>
 
       <div className="detail-types">
         {(detail?.types ?? []).map((type) => (
           <TypeBadge key={type} type={type} />
         ))}
-      </div>
-
-      <div className="detail-abilities">
-        <span>Habilidades</span>
-        <strong>{detail?.abilities?.join(', ') ?? 'Carregando...'}</strong>
       </div>
     </div>
   );
@@ -1191,6 +1230,16 @@ function playPokemonCry(url) {
 
   const audio = new Audio(url);
   audio.volume = 0.55;
+  audio.play().catch(() => {});
+}
+
+function playButtonSfx() {
+  if (typeof Audio === 'undefined') {
+    return;
+  }
+
+  const audio = new Audio(buttonSfx);
+  audio.volume = 0.12;
   audio.play().catch(() => {});
 }
 
