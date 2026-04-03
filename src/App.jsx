@@ -105,6 +105,7 @@ function App() {
   const [isBagOpen, setIsBagOpen] = useState(false);
   const [activeBagMenu, setActiveBagMenu] = useState('key-items');
   const [bagShake, setBagShake] = useState({ tick: 0, direction: 'right' });
+  const [detailLightActive, setDetailLightActive] = useState(false);
   const [mapPopupPhase, setMapPopupPhase] = useState('closed');
   const [bagData, setBagData] = useState(() => ({
     items: { ...INITIAL_BAG_MENU_STATE },
@@ -114,10 +115,19 @@ function App() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [metaError, setMetaError] = useState('');
   const bagDataRef = useRef(bagData);
+  const detailLightTimeoutRef = useRef(null);
 
   useEffect(() => {
     bagDataRef.current = bagData;
   }, [bagData]);
+
+  useEffect(() => {
+    return () => {
+      if (detailLightTimeoutRef.current) {
+        window.clearTimeout(detailLightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -288,6 +298,7 @@ function App() {
 
   function handleSelectPokemon(id) {
     playButtonSfx();
+    triggerDetailLight();
     setSelectedPokemonId(id);
 
     const cachedDetail = pokemonDetailCache[id];
@@ -315,6 +326,18 @@ function App() {
     });
   }
 
+  function triggerDetailLight() {
+    if (detailLightTimeoutRef.current) {
+      window.clearTimeout(detailLightTimeoutRef.current);
+    }
+
+    setDetailLightActive(true);
+    detailLightTimeoutRef.current = window.setTimeout(() => {
+      setDetailLightActive(false);
+      detailLightTimeoutRef.current = null;
+    }, 1600);
+  }
+
   return (
     <div className="app-shell">
       <div className="app-backdrop" />
@@ -338,13 +361,13 @@ function App() {
         <section id="regioes" className="pokedex-shell">
           <div className="pokedex-main">
             <div className="pokedex-main-accent" aria-hidden="true">
-              <span className="pokedex-main-lens" />
+              <span className={detailLightActive ? 'pokedex-main-lens is-active' : 'pokedex-main-lens'} />
               <span className="pokedex-main-ridge" />
             </div>
             <div className="pokedex-top-bar" aria-hidden="true">
-              <span className="dex-light dex-light-red" />
-              <span className="dex-light dex-light-yellow" />
-              <span className="dex-light dex-light-green" />
+              <span className={detailLightActive ? 'dex-light dex-light-red is-active' : 'dex-light dex-light-red'} />
+              <span className={detailLightActive ? 'dex-light dex-light-yellow is-active' : 'dex-light dex-light-yellow'} />
+              <span className={detailLightActive ? 'dex-light dex-light-green is-active' : 'dex-light dex-light-green'} />
             </div>
 
             <SearchPanel searchTerm={searchTerm} onChangeSearch={setSearchTerm} />
@@ -442,7 +465,10 @@ function App() {
                   <span>{generation.label}</span>
                 </button>
                 ))}
-              <div className="detail-button-circle" aria-hidden="true" />
+              <div
+                className={detailLightActive ? 'detail-button-circle is-active' : 'detail-button-circle'}
+                aria-hidden="true"
+              />
             </div>
           </aside>
         </section>
