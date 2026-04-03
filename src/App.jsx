@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import bagCloseSprite from './assets/bagClose.png';
 import bagLeftOpenSprite from './assets/BagLeftopen.png';
 import bagRightOpenSprite from './assets/BagRightopen.png';
 import bagUpOpenSprite from './assets/BagUpopen.png';
+import battle1Sfx from './SFX/Battle1SFX.ogg';
+import battle2Sfx from './SFX/Battle2SFX.ogg';
+import battle3Sfx from './SFX/Battle3SFX.ogg';
+import battle4Sfx from './SFX/Battle4SFX.ogg';
 import buttonSfx from './SFX/ButtonSFX.ogg';
 import menu1Sfx from './SFX/Menu1SFX.ogg';
 import menu2Sfx from './SFX/Menu2SFX.ogg';
@@ -11,12 +15,26 @@ import mapCloseSprite from './assets/MapClose.png';
 import mapOpenLeftSprite from './assets/MapOpenleft.png';
 import mapOpenRightSprite from './assets/MapOpenright.png';
 import pokeballCloseSprite from './assets/PokeballClose.png';
+import pokeballOpenSprite from './assets/PokeballOpen.png';
 import pokeballSemiOpenSprite from './assets/PokeballSemiOpen.png';
-import TeamBuilderPopup from './TeamBuilderPopup';
+import { buildBattleSetup } from './battleUtils';
+import {
+  capitalize,
+  cleanText,
+  extractId,
+  formatId,
+  formatName,
+  getAnimatedPixelSprite,
+  getCardSprite,
+  getStaticCardSprite,
+} from './pokemonHelpers';
+import { fetchJsonWithTimeout } from './pokeApi';
+import { TYPE_COLORS } from './typeData';
 
 const API_BASE = 'https://pokeapi.co/api/v2';
 const pokemonDetailRequestCache = new Map();
-const generationMetaCache = { data: null, promise: null };
+const generationEntriesCache = new Map();
+const generationEntriesPromiseCache = new Map();
 const BAG_ITEM_FETCH_LIMIT = 36;
 const pokeballCache = { status: 'idle', data: [], error: '', promise: null };
 const bagPocketCache = new Map();
@@ -27,6 +45,7 @@ const INITIAL_BAG_MENU_STATE = {
   selectedId: null,
 };
 const MENU_TRACKS = [menu1Sfx, menu2Sfx, menu3Sfx];
+const BATTLE_TRACKS = [battle1Sfx, battle2Sfx, battle3Sfx, battle4Sfx];
 const audioSettings = {
   muted: false,
   volume: 0.6,
@@ -44,27 +63,6 @@ const GENERATIONS = [
   { id: 8, label: 'Galar', accent: '#5f3dc4' },
   { id: 9, label: 'Paldea', accent: '#0b7285' },
 ];
-
-const TYPE_COLORS = {
-  normal: '#9fa19f',
-  fire: '#e86d3e',
-  water: '#5090d6',
-  electric: '#f4d23c',
-  grass: '#63bc5a',
-  ice: '#73cec0',
-  fighting: '#ce416b',
-  poison: '#b567ce',
-  ground: '#d97845',
-  flying: '#89aae3',
-  psychic: '#fa7179',
-  bug: '#91c12f',
-  rock: '#c5b78c',
-  ghost: '#5269ad',
-  dragon: '#0b6dc3',
-  dark: '#5a5465',
-  steel: '#5a8ea2',
-  fairy: '#ec8fe6',
-};
 
 const BAG_MENUS = [
   { id: 'items', label: 'Items', sprite: bagLeftOpenSprite },
@@ -108,8 +106,11 @@ const POKEBALL_ITEM_NAMES = [
   'beast-ball',
 ];
 
+const BattlePopup = lazy(() => import('./BattlePopup'));
+const TeamBuilderPopup = lazy(() => import('./TeamBuilderPopup'));
+
 function App() {
-  const [generationMeta, setGenerationMeta] = useState([]);
+  const [generationEntriesById, setGenerationEntriesById] = useState({});
   const [selectedGeneration, setSelectedGeneration] = useState(1);
   const [pokemonDetailCache, setPokemonDetailCache] = useState({});
   const [selectedPokemonId, setSelectedPokemonId] = useState(null);
@@ -125,7 +126,16 @@ function App() {
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [siteVolume, setSiteVolume] = useState(60);
+  const [isTeamBuilderCloseHovered, setIsTeamBuilderCloseHovered] = useState(false);
+  const [audioMode, setAudioMode] = useState('menu');
   const [menuTrackIndex, setMenuTrackIndex] = useState(() => Math.floor(Math.random() * MENU_TRACKS.length));
+  const [battleTrackIndex, setBattleTrackIndex] = useState(() => Math.floor(Math.random() * BATTLE_TRACKS.length));
+  const [battleState, setBattleState] = useState({
+    status: 'idle',
+    championKey: null,
+    error: '',
+    config: null,
+  });
   const [bagData, setBagData] = useState(() => ({
     items: { ...INITIAL_BAG_MENU_STATE },
     'key-items': { ...INITIAL_BAG_MENU_STATE },
@@ -133,9 +143,12 @@ function App() {
   }));
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [metaError, setMetaError] = useState('');
+  const [isSearchingAllGenerations, setIsSearchingAllGenerations] = useState(false);
   const bagDataRef = useRef(bagData);
   const detailLightTimeoutRef = useRef(null);
   const ambientAudioRef = useRef(null);
+  const lastBattleTrackIndexRef = useRef(-1);
+  const searchTermDeferred = useDeferredValue(searchTerm);
 
   useEffect(() => {
     bagDataRef.current = bagData;
@@ -164,22 +177,30 @@ function App() {
       return undefined;
     }
 
-    const ambientAudio = new Audio(MENU_TRACKS[menuTrackIndex]);
+    const trackSource =
+      audioMode === 'battle'
+        ? BATTLE_TRACKS[battleTrackIndex]
+        : MENU_TRACKS[menuTrackIndex];
+    const ambientAudio = new Audio(trackSource);
     ambientAudioRef.current = ambientAudio;
-    ambientAudio.loop = false;
+    ambientAudio.loop = audioMode === 'battle';
     ambientAudio.preload = 'auto';
-    ambientAudio.volume = getAmbientVolume();
+    ambientAudio.volume = audioMode === 'battle' ? getBattleMusicVolume() : getAmbientVolume();
 
     function playAmbient() {
-      ambientAudio.volume = getAmbientVolume();
+      ambientAudio.volume = audioMode === 'battle' ? getBattleMusicVolume() : getAmbientVolume();
       ambientAudio.play().catch(() => {});
     }
 
     function handleEnded() {
-      setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length);
+      if (audioMode === 'menu') {
+        setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length);
+      }
     }
 
-    ambientAudio.addEventListener('ended', handleEnded);
+    if (audioMode === 'menu') {
+      ambientAudio.addEventListener('ended', handleEnded);
+    }
     playAmbient();
 
     window.addEventListener('pointerdown', playAmbient);
@@ -195,29 +216,33 @@ function App() {
         ambientAudioRef.current = null;
       }
     };
-  }, [menuTrackIndex]);
+  }, [audioMode, battleTrackIndex, menuTrackIndex]);
 
   useEffect(() => {
     if (!ambientAudioRef.current) {
       return;
     }
 
-    ambientAudioRef.current.volume = getAmbientVolume();
-  }, [isMuted, siteVolume]);
+    ambientAudioRef.current.volume = audioMode === 'battle' ? getBattleMusicVolume() : getAmbientVolume();
+  }, [audioMode, isMuted, siteVolume]);
 
   useEffect(() => {
     let active = true;
 
-    async function loadInitialData() {
+    async function loadSelectedGeneration() {
       try {
         setLoadingMeta(true);
-        const meta = await fetchGenerationMetaCached();
+        const entries = await fetchGenerationEntriesCached(selectedGeneration);
 
         if (!active) {
           return;
         }
 
-        setGenerationMeta(meta);
+        setGenerationEntriesById((current) => ({
+          ...current,
+          [selectedGeneration]: entries,
+        }));
+        setMetaError('');
       } catch (error) {
         if (active) {
           setMetaError('Nao foi possivel carregar os dados da PokeAPI.');
@@ -229,12 +254,61 @@ function App() {
       }
     }
 
-    loadInitialData();
+    loadSelectedGeneration();
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedGeneration]);
+
+  useEffect(() => {
+    if (!searchTermDeferred.trim()) {
+      return undefined;
+    }
+
+    const missingGenerationIds = GENERATIONS
+      .map((generation) => generation.id)
+      .filter((id) => !generationEntriesById[id]);
+
+    if (!missingGenerationIds.length) {
+      return undefined;
+    }
+
+    let active = true;
+    setIsSearchingAllGenerations(true);
+
+    Promise.all(
+      missingGenerationIds.map(async (generationId) => ({
+        generationId,
+        entries: await fetchGenerationEntriesCached(generationId),
+      })),
+    )
+      .then((results) => {
+        if (!active) {
+          return;
+        }
+
+        setGenerationEntriesById((current) => {
+          const next = { ...current };
+
+          results.forEach(({ generationId, entries }) => {
+            next[generationId] = entries;
+          });
+
+          return next;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) {
+          setIsSearchingAllGenerations(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [generationEntriesById, searchTermDeferred]);
 
   useEffect(() => {
     if (!isBagOpen) {
@@ -298,18 +372,18 @@ function App() {
   }, [activeBagMenu, isBagOpen]);
 
   const currentGeneration = useMemo(
-    () => generationMeta.find((item) => item.id === selectedGeneration),
-    [generationMeta, selectedGeneration],
+    () => GENERATIONS.find((item) => item.id === selectedGeneration) ?? GENERATIONS[0],
+    [selectedGeneration],
   );
 
-  const currentGenerationEntries = currentGeneration?.pokemonEntries ?? [];
+  const currentGenerationEntries = generationEntriesById[selectedGeneration] ?? [];
 
   const allPokemonEntries = useMemo(
-    () => generationMeta.flatMap((generation) => generation.pokemonEntries ?? []),
-    [generationMeta],
+    () => Object.values(generationEntriesById).flat(),
+    [generationEntriesById],
   );
 
-  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const normalizedSearch = searchTermDeferred.trim().toLowerCase();
   const filteredPokemon = useMemo(() => {
     if (!normalizedSearch) {
       return currentGenerationEntries;
@@ -510,6 +584,51 @@ function App() {
     );
   }
 
+  async function handleStartBattle(championKey) {
+    if (!selectedTeam?.members.length) {
+      return;
+    }
+
+    setBattleState({
+      status: 'loading',
+      championKey,
+      error: '',
+      config: null,
+    });
+
+    try {
+      const config = await buildBattleSetup(championKey, selectedTeam.members);
+      const nextTrackIndex = pickNextBattleTrackIndex(BATTLE_TRACKS.length, lastBattleTrackIndexRef.current);
+
+      lastBattleTrackIndexRef.current = nextTrackIndex;
+      setBattleTrackIndex(nextTrackIndex);
+      setAudioMode('battle');
+      setBattleState({
+        status: 'ready',
+        championKey,
+        error: '',
+        config,
+      });
+    } catch (error) {
+      setBattleState({
+        status: 'error',
+        championKey,
+        error: error.message || 'Nao foi possivel montar a batalha agora.',
+        config: null,
+      });
+    }
+  }
+
+  function handleCloseBattle() {
+    setBattleState({
+      status: 'idle',
+      championKey: null,
+      error: '',
+      config: null,
+    });
+    setAudioMode('menu');
+  }
+
   return (
     <div className="app-shell">
       <div className="app-backdrop" />
@@ -530,6 +649,8 @@ function App() {
         }}
       />
       <PokeballWidget
+        isOpen={isTeamBuilderOpen}
+        isCloseHovered={isTeamBuilderCloseHovered}
         onClick={() => {
           playButtonSfx();
           setIsTeamBuilderOpen(true);
@@ -558,6 +679,10 @@ function App() {
                     <>
                       {!currentGenerationEntries.length ? (
                         <LoadingState label="Carregando primeiros cards da geracao..." />
+                      ) : null}
+
+                      {normalizedSearch && isSearchingAllGenerations ? (
+                        <LoadingState label="Ampliando busca para todas as geracoes..." />
                       ) : null}
 
                       {filteredPokemon.length ? (
@@ -635,7 +760,7 @@ function App() {
             </div>
 
             <div className="detail-button-grid" role="tablist" aria-label="Geracoes">
-              {generationMeta.map((generation) => (
+              {GENERATIONS.map((generation) => (
                 <button
                   key={generation.id}
                   type="button"
@@ -719,35 +844,70 @@ function App() {
         volume={siteVolume}
         onToggleMute={() => setIsMuted((current) => !current)}
         onVolumeChange={(value) => setSiteVolume(value)}
-        onNextTrack={() => setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length)}
+        onNextTrack={() => {
+          if (audioMode === 'battle') {
+            const nextTrackIndex = pickNextBattleTrackIndex(BATTLE_TRACKS.length, battleTrackIndex);
+            lastBattleTrackIndexRef.current = nextTrackIndex;
+            setBattleTrackIndex(nextTrackIndex);
+            return;
+          }
+
+          setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length);
+        }}
       />
 
       {isTeamBuilderOpen ? (
-        <TeamBuilderPopup
-          teams={teams}
-          selectedTeamId={selectedTeam?.id ?? null}
-          onSelectTeam={(teamId) => {
-            playButtonSfx();
-            setSelectedTeamId(teamId);
-          }}
-          onCreateTeam={() => {
-            playButtonSfx();
-            handleCreateTeam();
-          }}
-          onRenameTeam={handleRenameTeam}
-          onDeleteTeam={(teamId) => {
-            playButtonSfx();
-            handleDeleteTeam(teamId);
-          }}
-          onRemoveMember={(teamId, memberIndex) => {
-            playButtonSfx();
-            handleRemovePokemonFromTeam(teamId, memberIndex);
-          }}
-          onRequestClose={() => {
-            playButtonSfx();
-            setIsTeamBuilderOpen(false);
-          }}
-        />
+        <Suspense fallback={<OverlayLoading label="Abrindo team builder..." />}>
+          <TeamBuilderPopup
+            teams={teams}
+            selectedTeamId={selectedTeam?.id ?? null}
+            onSelectTeam={(teamId) => {
+              playButtonSfx();
+              setSelectedTeamId(teamId);
+            }}
+            onCreateTeam={() => {
+              playButtonSfx();
+              handleCreateTeam();
+            }}
+            onRenameTeam={handleRenameTeam}
+            onDeleteTeam={(teamId) => {
+              playButtonSfx();
+              handleDeleteTeam(teamId);
+            }}
+            onRemoveMember={(teamId, memberIndex) => {
+              playButtonSfx();
+              handleRemovePokemonFromTeam(teamId, memberIndex);
+            }}
+            onStartBattle={(championKey) => {
+              playButtonSfx();
+              handleStartBattle(championKey);
+            }}
+            battleLaunchState={battleState.status}
+            battleLaunchError={battleState.status === 'error' ? battleState.error : ''}
+            onCloseHoverChange={setIsTeamBuilderCloseHovered}
+            onRequestClose={() => {
+              playButtonSfx();
+              setIsTeamBuilderCloseHovered(false);
+              setIsTeamBuilderOpen(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {battleState.status === 'ready' && battleState.config ? (
+        <Suspense fallback={<OverlayLoading label="Abrindo batalha..." />}>
+          <BattlePopup
+            battleConfig={battleState.config}
+            onButtonClick={playButtonSfx}
+            onClose={() => {
+              playButtonSfx();
+              handleCloseBattle();
+            }}
+            onComplete={() => {
+              handleCloseBattle();
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {isBagOpen ? (
@@ -946,7 +1106,7 @@ function BagPopup({
           aria-label="Ir para o menu anterior"
           disabled={!canGoLeft}
         >
-          ‹
+          {'<'}
         </button>
 
         <article className="bag-panel">
@@ -958,7 +1118,7 @@ function BagPopup({
               onClick={onClose}
               aria-label="Fechar bolsa"
             >
-              ×
+              x
             </button>
           </div>
 
@@ -977,7 +1137,7 @@ function BagPopup({
           aria-label="Ir para o proximo menu"
           disabled={!canGoRight}
         >
-          ›
+          {'>'}
         </button>
       </div>
     </div>
@@ -1054,7 +1214,7 @@ function BagInventoryPanel({ activeMenu, inventoryState, selectedItem, onSelectI
   );
 }
 
-function PokemonGridCard({ pokemon, isActive, onSelect }) {
+const PokemonGridCard = memo(function PokemonGridCard({ pokemon, isActive, onSelect }) {
   return (
     <button
       type="button"
@@ -1073,7 +1233,7 @@ function PokemonGridCard({ pokemon, isActive, onSelect }) {
       <strong title={pokemon.displayName}>{pokemon.displayName}</strong>
     </button>
   );
-}
+});
 
 function PokedexDetailPanel({
   pokemon,
@@ -1173,13 +1333,13 @@ function PokedexDetailPanel({
   );
 }
 
-function TypeBadge({ type }) {
+const TypeBadge = memo(function TypeBadge({ type }) {
   return (
     <span className="type-badge" style={{ '--type-color': TYPE_COLORS[type] ?? '#74828f' }}>
       {capitalize(type)}
     </span>
   );
-}
+});
 
 function LoadingState({ label }) {
   return (
@@ -1198,6 +1358,17 @@ function ErrorState({ label }) {
   );
 }
 
+function OverlayLoading({ label }) {
+  return (
+    <div className="battle-layer" role="presentation">
+      <div className="status-card">
+        <div className="spinner" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function FooterLink({ href, label, icon }) {
   return (
     <a href={href} target={href.startsWith('mailto:') ? undefined : '_blank'} rel="noreferrer">
@@ -1211,11 +1382,25 @@ function FooterLink({ href, label, icon }) {
   );
 }
 
-function PokeballWidget({ onClick }) {
+function PokeballWidget({ isOpen, isCloseHovered, onClick }) {
+  const rootClassName = [
+    'pokeball-widget',
+    isOpen ? 'is-open' : '',
+    isCloseHovered ? 'is-close-hovered' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <button type="button" className="pokeball-widget" aria-label="Abrir team builder" onClick={onClick}>
+    <button
+      type="button"
+      className={rootClassName}
+      aria-label={isOpen ? 'Team builder aberto' : 'Abrir team builder'}
+      disabled={isOpen}
+      onClick={onClick}
+    >
       <span className="pokeball-sprite pokeball-sprite-closed">
-        <img src={pokeballCloseSprite} alt="" className="pixel-art" />
+        <img src={isOpen ? pokeballOpenSprite : pokeballCloseSprite} alt="" className="pixel-art" />
       </span>
       <span className="pokeball-sprite pokeball-sprite-hover">
         <img src={pokeballSemiOpenSprite} alt="" className="pixel-art" />
@@ -1274,52 +1459,52 @@ function AudioDock({ isMuted, volume, onToggleMute, onVolumeChange, onNextTrack 
   );
 }
 
-async function fetchGenerationMeta() {
-  const responses = await Promise.all(
-    GENERATIONS.map(async (generation) => {
-      const data = await fetchJsonWithTimeout(
-        `${API_BASE}/generation/${generation.id}`,
-        `generation ${generation.id}`,
-      );
-      const pokemonEntries = data.pokemon_species
-        .map((species) => ({
-          id: extractId(species.url),
-          name: species.name,
-          displayName: formatName(species.name),
-          generationId: generation.id,
-          generationLabel: generation.label,
-        }))
-        .filter((species) => Number.isInteger(species.id))
-        .sort((a, b) => a.id - b.id);
+async function fetchGenerationEntries(generationId) {
+  const generation = GENERATIONS.find((item) => item.id === generationId);
 
-      return {
-        ...generation,
-        pokemonEntries,
-      };
-    }),
+  if (!generation) {
+    throw new Error(`Geracao ${generationId} nao encontrada.`);
+  }
+
+  const data = await fetchJsonWithTimeout(
+    `${API_BASE}/generation/${generation.id}`,
+    `generation ${generation.id}`,
   );
 
-  return responses;
+  return data.pokemon_species
+    .map((species) => ({
+      id: extractId(species.url),
+      name: species.name,
+      displayName: formatName(species.name),
+      generationId: generation.id,
+      generationLabel: generation.label,
+    }))
+    .filter((species) => Number.isInteger(species.id))
+    .sort((a, b) => a.id - b.id);
 }
 
-async function fetchGenerationMetaCached() {
-  if (generationMetaCache.data) {
-    return generationMetaCache.data;
+async function fetchGenerationEntriesCached(generationId) {
+  if (generationEntriesCache.has(generationId)) {
+    return generationEntriesCache.get(generationId);
   }
 
-  if (!generationMetaCache.promise) {
-    generationMetaCache.promise = fetchGenerationMeta()
-      .then((meta) => {
-        generationMetaCache.data = meta;
-        return meta;
-      })
-      .catch((error) => {
-        generationMetaCache.promise = null;
-        throw error;
-      });
+  if (!generationEntriesPromiseCache.has(generationId)) {
+    generationEntriesPromiseCache.set(
+      generationId,
+      fetchGenerationEntries(generationId)
+        .then((entries) => {
+          generationEntriesCache.set(generationId, entries);
+          generationEntriesPromiseCache.delete(generationId);
+          return entries;
+        })
+        .catch((error) => {
+          generationEntriesPromiseCache.delete(generationId);
+          throw error;
+        }),
+    );
   }
 
-  return generationMetaCache.promise;
+  return generationEntriesPromiseCache.get(generationId);
 }
 
 async function fetchPokeballItems() {
@@ -1415,29 +1600,6 @@ async function fetchPocketItems(pocketName, limit = BAG_ITEM_FETCH_LIMIT) {
   return promise;
 }
 
-async function fetchJsonWithTimeout(url, label, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-
-    if (!response.ok) {
-      throw new Error(`${label} failed`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error(`${label} timed out`);
-    }
-
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
 async function primePokemonDetails(id, setPokemonDetailCache) {
   setPokemonDetailCache((current) => {
     if (current[id]?.status) {
@@ -1495,7 +1657,6 @@ async function fetchPokemonDetails(id) {
             heightLabel: `${(pokemon.height / 10).toFixed(1)} m`,
             weightLabel: `${(pokemon.weight / 10).toFixed(1)} kg`,
             flavor: cleanFlavor,
-            shortFlavor: truncate(cleanFlavor, 108),
           };
         })
         .catch((error) => {
@@ -1548,16 +1709,6 @@ function mapInventoryItem(item, index) {
   };
 }
 
-function getAnimatedPixelSprite(pokemon) {
-  return (
-    pokemon.sprites.versions?.['generation-v']?.['black-white']?.animated?.front_default ??
-    pokemon.sprites.other?.showdown?.front_default ??
-    pokemon.sprites.versions?.['generation-v']?.['black-white']?.front_default ??
-    pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.front_default ??
-    pokemon.sprites.front_default
-  );
-}
-
 function playPokemonCry(url) {
   if (!url || typeof Audio === 'undefined') {
     return;
@@ -1594,16 +1745,30 @@ function getAmbientVolume() {
   return clampVolume(audioSettings.volume * 0.18);
 }
 
+function getBattleMusicVolume() {
+  if (audioSettings.muted) {
+    return 0;
+  }
+
+  return clampVolume(audioSettings.volume * 0.34);
+}
+
 function clampVolume(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-function getCardSprite(id) {
-  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${id}.gif`;
-}
+function pickNextBattleTrackIndex(trackCount, previousIndex) {
+  if (trackCount <= 1) {
+    return 0;
+  }
 
-function getStaticCardSprite(id) {
-  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/${id}.png`;
+  let nextIndex = Math.floor(Math.random() * trackCount);
+
+  while (nextIndex === previousIndex) {
+    nextIndex = Math.floor(Math.random() * trackCount);
+  }
+
+  return nextIndex;
 }
 
 function buildTeamMemberSnapshot(pokemon, detailState, currentGeneration) {
@@ -1631,38 +1796,6 @@ function handleCardSpriteError(event) {
   }
 
   image.src = fallbackSrc;
-}
-
-function extractId(url) {
-  const match = url.match(/\/(\d+)\/?$/);
-  return match ? Number(match[1]) : null;
-}
-
-function formatName(value) {
-  return value
-    .split('-')
-    .map((part) => capitalize(part))
-    .join(' ');
-}
-
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function formatId(id) {
-  return String(id).padStart(4, '0');
-}
-
-function truncate(text, size) {
-  if (text.length <= size) {
-    return text;
-  }
-
-  return `${text.slice(0, size - 1)}...`;
-}
-
-function cleanText(text) {
-  return text.replace(/\f|\n|\r/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export default App;

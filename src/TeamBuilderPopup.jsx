@@ -1,71 +1,8 @@
-import { useEffect } from 'react';
-
-const championSpriteModules = import.meta.glob('./Champions/*.{png,jpg,jpeg,webp}', {
-  eager: true,
-  import: 'default',
-});
-
-const CHAMPIONS = [
-  { key: 'red', label: 'Red' },
-  { key: 'green', label: 'Green' },
-  { key: 'cynthia', label: 'Cynthia' },
-  { key: 'iris', label: 'Iris' },
-  { key: 'steven', label: 'Steven' },
-  { key: 'n', label: 'N' },
-  { key: 'lance', label: 'Lance' },
-  { key: 'brendan', label: 'Brendan' },
-];
-
-const championSprites = Object.entries(championSpriteModules).reduce((spriteMap, [path, source]) => {
-  const fileName = path.split('/').pop() ?? '';
-  const normalizedName = fileName.replace(/\.[^.]+$/, '').toLowerCase();
-  spriteMap[normalizedName] = source;
-  return spriteMap;
-}, {});
-
-const TYPE_COLORS = {
-  normal: '#9fa19f',
-  fire: '#e86d3e',
-  water: '#5090d6',
-  electric: '#f4d23c',
-  grass: '#63bc5a',
-  ice: '#73cec0',
-  fighting: '#ce416b',
-  poison: '#b567ce',
-  ground: '#d97845',
-  flying: '#89aae3',
-  psychic: '#fa7179',
-  bug: '#91c12f',
-  rock: '#c5b78c',
-  ghost: '#5269ad',
-  dragon: '#0b6dc3',
-  dark: '#5a5465',
-  steel: '#5a8ea2',
-  fairy: '#ec8fe6',
-};
-
-const TYPE_CHART = {
-  normal: { rock: 0.5, ghost: 0, steel: 0.5 },
-  fire: { fire: 0.5, water: 0.5, grass: 2, ice: 2, bug: 2, rock: 0.5, dragon: 0.5, steel: 2 },
-  water: { fire: 2, water: 0.5, grass: 0.5, ground: 2, rock: 2, dragon: 0.5 },
-  electric: { water: 2, electric: 0.5, grass: 0.5, ground: 0, flying: 2, dragon: 0.5 },
-  grass: { fire: 0.5, water: 2, grass: 0.5, poison: 0.5, ground: 2, flying: 0.5, bug: 0.5, rock: 2, dragon: 0.5, steel: 0.5 },
-  ice: { fire: 0.5, water: 0.5, grass: 2, ground: 2, flying: 2, dragon: 2, steel: 0.5, ice: 0.5 },
-  fighting: { normal: 2, ice: 2, poison: 0.5, flying: 0.5, psychic: 0.5, bug: 0.5, rock: 2, ghost: 0, dark: 2, steel: 2, fairy: 0.5 },
-  poison: { grass: 2, poison: 0.5, ground: 0.5, rock: 0.5, ghost: 0.5, steel: 0, fairy: 2 },
-  ground: { fire: 2, electric: 2, grass: 0.5, poison: 2, flying: 0, bug: 0.5, rock: 2, steel: 2 },
-  flying: { electric: 0.5, grass: 2, fighting: 2, bug: 2, rock: 0.5, steel: 0.5 },
-  psychic: { fighting: 2, poison: 2, psychic: 0.5, dark: 0, steel: 0.5 },
-  bug: { fire: 0.5, grass: 2, fighting: 0.5, poison: 0.5, flying: 0.5, psychic: 2, ghost: 0.5, dark: 2, steel: 0.5, fairy: 0.5 },
-  rock: { fire: 2, ice: 2, fighting: 0.5, ground: 0.5, flying: 2, bug: 2, steel: 0.5 },
-  ghost: { normal: 0, psychic: 2, ghost: 2, dark: 0.5 },
-  dragon: { dragon: 2, steel: 0.5, fairy: 0 },
-  dark: { fighting: 0.5, psychic: 2, ghost: 2, dark: 0.5, fairy: 0.5 },
-  steel: { fire: 0.5, water: 0.5, electric: 0.5, ice: 2, rock: 2, steel: 0.5, fairy: 2 },
-  fairy: { fire: 0.5, fighting: 2, poison: 0.5, dragon: 2, dark: 2, steel: 0.5 },
-};
-
-const ALL_TYPES = Object.keys(TYPE_COLORS);
+import { useEffect, useMemo, useState } from 'react';
+import { CHAMPIONS } from './championData';
+import { championSprites } from './championSprites';
+import { capitalize } from './pokemonHelpers';
+import { ALL_TYPES, TYPE_COLORS, getTypeMultiplier } from './typeData';
 
 export default function TeamBuilderPopup({
   teams,
@@ -75,21 +12,31 @@ export default function TeamBuilderPopup({
   onRenameTeam,
   onDeleteTeam,
   onRemoveMember,
+  onStartBattle,
+  battleLaunchState,
+  battleLaunchError,
   onRequestClose,
+  onCloseHoverChange = () => {},
 }) {
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
   const summary = buildTeamSummary(selectedTeam?.members ?? []);
+  const [pendingChampionKey, setPendingChampionKey] = useState(null);
+  const pendingChampion = useMemo(
+    () => CHAMPIONS.find((champion) => champion.key === pendingChampionKey) ?? null,
+    [pendingChampionKey],
+  );
+  const canStartBattle = (selectedTeam?.members.length ?? 0) > 0;
 
   useEffect(() => {
     function handleEscape(event) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && battleLaunchState !== 'ready') {
         onRequestClose();
       }
     }
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [onRequestClose]);
+  }, [battleLaunchState, onRequestClose]);
 
   return (
     <div className="team-builder-layer" role="presentation" onClick={onRequestClose}>
@@ -98,6 +45,10 @@ export default function TeamBuilderPopup({
           type="button"
           className="team-builder-close"
           onClick={onRequestClose}
+          onMouseEnter={() => onCloseHoverChange(true)}
+          onMouseLeave={() => onCloseHoverChange(false)}
+          onFocus={() => onCloseHoverChange(true)}
+          onBlur={() => onCloseHoverChange(false)}
           aria-label="Fechar team builder"
         >
           x
@@ -111,22 +62,30 @@ export default function TeamBuilderPopup({
           <div className="team-builder-champions">
             <div className="team-builder-champion-strip">
               {CHAMPIONS.map((champion) => (
-                <figure key={champion.key} className="team-builder-champion-card">
-                  <div className="team-builder-champion-sprite-wrap">
-                    {championSprites[champion.key] ? (
-                      <img
-                        src={championSprites[champion.key]}
-                        alt={champion.label}
-                        className="team-builder-champion-sprite pixel-art"
-                      />
-                    ) : (
-                      <div className="team-builder-champion-missing" aria-hidden="true" />
-                    )}
-                  </div>
-                  <figcaption className="team-builder-champion-label">{champion.label}</figcaption>
-                </figure>
+                <button
+                  key={champion.key}
+                  type="button"
+                  className="team-builder-champion-button"
+                  onClick={() => setPendingChampionKey(champion.key)}
+                >
+                  <figure className="team-builder-champion-card">
+                    <div className="team-builder-champion-sprite-wrap">
+                      {championSprites[champion.key] ? (
+                        <img
+                          src={championSprites[champion.key]}
+                          alt={champion.label}
+                          className="team-builder-champion-sprite pixel-art"
+                        />
+                      ) : (
+                        <div className="team-builder-champion-missing" aria-hidden="true" />
+                      )}
+                    </div>
+                    <figcaption className="team-builder-champion-label">{champion.label}</figcaption>
+                  </figure>
+                </button>
               ))}
             </div>
+            {battleLaunchError ? <p className="team-builder-battle-error">{battleLaunchError}</p> : null}
           </div>
 
           <div className="team-builder-body">
@@ -220,6 +179,44 @@ export default function TeamBuilderPopup({
             </section>
           </div>
         </div>
+
+        {pendingChampion ? (
+          <div className="team-builder-battle-confirm" role="dialog" aria-modal="true" aria-label={`Confirmar batalha contra ${pendingChampion.label}`}>
+            <div className="team-builder-battle-card">
+              <strong>Batalhar com {pendingChampion.label}?</strong>
+              <p>
+                Time atual: <span>{selectedTeam?.name ?? 'Sem time'}</span>
+              </p>
+              {!canStartBattle ? <small>Adicione pelo menos um Pokemon ao time antes de batalhar.</small> : null}
+              {battleLaunchError ? <small>{battleLaunchError}</small> : null}
+              <div className="team-builder-battle-actions">
+                <button type="button" className="team-builder-battle-cancel" onClick={() => setPendingChampionKey(null)}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="team-builder-battle-start"
+                  onClick={() => {
+                    onStartBattle(pendingChampion.key);
+                    setPendingChampionKey(null);
+                  }}
+                  disabled={!canStartBattle || battleLaunchState === 'loading'}
+                >
+                  {battleLaunchState === 'loading' ? 'Montando...' : 'Confirmar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {battleLaunchState === 'loading' ? (
+          <div className="team-builder-battle-confirm" role="presentation">
+            <div className="team-builder-battle-card">
+              <strong>Montando batalha...</strong>
+              <p>Carregando golpes, stats e o time do champion.</p>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -299,13 +296,9 @@ function sortEntries(valueMap) {
 }
 
 function getMultiplier(attackType, defenderTypes) {
-  return defenderTypes.reduce((acc, defenderType) => acc * getAttackMultiplier(attackType, defenderType), 1);
+  return getTypeMultiplier(attackType, defenderTypes);
 }
 
 function getAttackMultiplier(attackType, defenderType) {
-  return TYPE_CHART[attackType]?.[defenderType] ?? 1;
-}
-
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return getTypeMultiplier(attackType, [defenderType]);
 }
