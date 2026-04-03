@@ -3,10 +3,16 @@ import bagCloseSprite from './assets/bagClose.png';
 import bagLeftOpenSprite from './assets/BagLeftopen.png';
 import bagRightOpenSprite from './assets/BagRightopen.png';
 import bagUpOpenSprite from './assets/BagUpopen.png';
-import buttonSfx from './assets/ButtonSFX.ogg';
+import buttonSfx from './SFX/ButtonSFX.ogg';
+import menu1Sfx from './SFX/Menu1SFX.ogg';
+import menu2Sfx from './SFX/Menu2SFX.ogg';
+import menu3Sfx from './SFX/Menu3SFX.ogg';
 import mapCloseSprite from './assets/MapClose.png';
 import mapOpenLeftSprite from './assets/MapOpenleft.png';
 import mapOpenRightSprite from './assets/MapOpenright.png';
+import pokeballCloseSprite from './assets/PokeballClose.png';
+import pokeballSemiOpenSprite from './assets/PokeballSemiOpen.png';
+import TeamBuilderPopup from './TeamBuilderPopup';
 
 const API_BASE = 'https://pokeapi.co/api/v2';
 const pokemonDetailRequestCache = new Map();
@@ -20,6 +26,12 @@ const INITIAL_BAG_MENU_STATE = {
   error: '',
   selectedId: null,
 };
+const MENU_TRACKS = [menu1Sfx, menu2Sfx, menu3Sfx];
+const audioSettings = {
+  muted: false,
+  volume: 0.6,
+};
+const INITIAL_TEAMS = [{ id: 'team-1', name: 'Time 1', members: [] }];
 
 const GENERATIONS = [
   { id: 1, label: 'Kanto', accent: '#ff6b6b' },
@@ -107,6 +119,13 @@ function App() {
   const [bagShake, setBagShake] = useState({ tick: 0, direction: 'right' });
   const [detailLightActive, setDetailLightActive] = useState(false);
   const [mapPopupPhase, setMapPopupPhase] = useState('closed');
+  const [isTeamBuilderOpen, setIsTeamBuilderOpen] = useState(false);
+  const [teams, setTeams] = useState(INITIAL_TEAMS);
+  const [selectedTeamId, setSelectedTeamId] = useState(INITIAL_TEAMS[0].id);
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [siteVolume, setSiteVolume] = useState(60);
+  const [menuTrackIndex, setMenuTrackIndex] = useState(() => Math.floor(Math.random() * MENU_TRACKS.length));
   const [bagData, setBagData] = useState(() => ({
     items: { ...INITIAL_BAG_MENU_STATE },
     'key-items': { ...INITIAL_BAG_MENU_STATE },
@@ -116,6 +135,7 @@ function App() {
   const [metaError, setMetaError] = useState('');
   const bagDataRef = useRef(bagData);
   const detailLightTimeoutRef = useRef(null);
+  const ambientAudioRef = useRef(null);
 
   useEffect(() => {
     bagDataRef.current = bagData;
@@ -126,8 +146,64 @@ function App() {
       if (detailLightTimeoutRef.current) {
         window.clearTimeout(detailLightTimeoutRef.current);
       }
+
+      if (ambientAudioRef.current) {
+        ambientAudioRef.current.pause();
+        ambientAudioRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    audioSettings.muted = isMuted;
+    audioSettings.volume = siteVolume / 100;
+  }, [isMuted, siteVolume]);
+
+  useEffect(() => {
+    if (typeof Audio === 'undefined') {
+      return undefined;
+    }
+
+    const ambientAudio = new Audio(MENU_TRACKS[menuTrackIndex]);
+    ambientAudioRef.current = ambientAudio;
+    ambientAudio.loop = false;
+    ambientAudio.preload = 'auto';
+    ambientAudio.volume = getAmbientVolume();
+
+    function playAmbient() {
+      ambientAudio.volume = getAmbientVolume();
+      ambientAudio.play().catch(() => {});
+    }
+
+    function handleEnded() {
+      setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length);
+    }
+
+    ambientAudio.addEventListener('ended', handleEnded);
+    playAmbient();
+
+    window.addEventListener('pointerdown', playAmbient);
+    window.addEventListener('keydown', playAmbient);
+
+    return () => {
+      ambientAudio.pause();
+      ambientAudio.removeEventListener('ended', handleEnded);
+      window.removeEventListener('pointerdown', playAmbient);
+      window.removeEventListener('keydown', playAmbient);
+
+      if (ambientAudioRef.current === ambientAudio) {
+        ambientAudioRef.current = null;
+      }
+    };
+  }, [menuTrackIndex]);
+
+  useEffect(() => {
+    if (!ambientAudioRef.current) {
+      return;
+    }
+
+    ambientAudioRef.current.volume = getAmbientVolume();
+  }, [isMuted, siteVolume]);
 
   useEffect(() => {
     let active = true;
@@ -226,13 +302,7 @@ function App() {
     [generationMeta, selectedGeneration],
   );
 
-  const currentGenerationState = {
-    status: loadingMeta ? 'loading' : metaError ? 'error' : 'success',
-    data: currentGeneration?.pokemonEntries ?? [],
-    error: metaError,
-    loadedCount: currentGeneration?.pokemonEntries?.length ?? 0,
-    total: currentGeneration?.pokemonEntries?.length ?? 0,
-  };
+  const currentGenerationEntries = currentGeneration?.pokemonEntries ?? [];
 
   const allPokemonEntries = useMemo(
     () => generationMeta.flatMap((generation) => generation.pokemonEntries ?? []),
@@ -242,7 +312,7 @@ function App() {
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredPokemon = useMemo(() => {
     if (!normalizedSearch) {
-      return currentGenerationState.data;
+      return currentGenerationEntries;
     }
 
     return allPokemonEntries.filter((pokemon) => {
@@ -254,7 +324,7 @@ function App() {
         String(pokemon.id).includes(normalizedSearch)
       );
     });
-  }, [allPokemonEntries, currentGenerationState.data, normalizedSearch]);
+  }, [allPokemonEntries, currentGenerationEntries, normalizedSearch]);
 
   const selectedPokemon =
     filteredPokemon.find((pokemon) => pokemon.id === selectedPokemonId) ??
@@ -268,6 +338,7 @@ function App() {
     activeBagDataState.data.find((item) => item.id === activeBagDataState.selectedId) ??
     activeBagDataState.data[0] ??
     null;
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
 
   useEffect(() => {
     if (!filteredPokemon.length) {
@@ -295,6 +366,10 @@ function App() {
 
     playPokemonCry(selectedPokemonDetailState.data.cryUrl);
   }, [selectedPokemonDetailState]);
+
+  useEffect(() => {
+    setIsQuickAddOpen(false);
+  }, [selectedPokemonId]);
 
   function handleSelectPokemon(id) {
     playButtonSfx();
@@ -338,6 +413,103 @@ function App() {
     }, 1600);
   }
 
+  function handleCreateTeam() {
+    const nextId = `team-${Date.now()}`;
+
+    setTeams((current) => [
+      ...current,
+      {
+        id: nextId,
+        name: `Time ${current.length + 1}`,
+        members: [],
+      },
+    ]);
+    setSelectedTeamId(nextId);
+  }
+
+  function handleRenameTeam(teamId, nextName) {
+    setTeams((current) =>
+      current.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              name: nextName.slice(0, 24),
+            }
+          : team,
+      ),
+    );
+  }
+
+  function handleDeleteTeam(teamId) {
+    let nextSelectedId = selectedTeamId;
+
+    setTeams((current) => {
+      if (current.length <= 1) {
+        const replacementId = `team-${Date.now()}`;
+        nextSelectedId = replacementId;
+        return [
+          {
+            id: replacementId,
+            name: 'Time 1',
+            members: [],
+          },
+        ];
+      }
+
+      const currentIndex = current.findIndex((team) => team.id === teamId);
+      const nextTeams = current.filter((team) => team.id !== teamId);
+
+      if (selectedTeamId === teamId) {
+        const fallbackTeam =
+          nextTeams[currentIndex] ??
+          nextTeams[currentIndex - 1] ??
+          nextTeams[0] ??
+          null;
+        nextSelectedId = fallbackTeam?.id ?? nextTeams[0]?.id ?? INITIAL_TEAMS[0].id;
+      }
+
+      return nextTeams;
+    });
+
+    setSelectedTeamId(nextSelectedId);
+  }
+
+  function handleAddSelectedPokemonToTeam(teamId) {
+    if (!selectedPokemon) {
+      return;
+    }
+
+    const member = buildTeamMemberSnapshot(selectedPokemon, selectedPokemonDetailState, currentGeneration);
+
+    setTeams((current) =>
+      current.map((team) => {
+        if (team.id !== teamId || team.members.length >= 6) {
+          return team;
+        }
+
+        return {
+          ...team,
+          members: [...team.members, member],
+        };
+      }),
+    );
+    setSelectedTeamId(teamId);
+    setIsQuickAddOpen(false);
+  }
+
+  function handleRemovePokemonFromTeam(teamId, memberIndex) {
+    setTeams((current) =>
+      current.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              members: team.members.filter((_, index) => index !== memberIndex),
+            }
+          : team,
+      ),
+    );
+  }
+
   return (
     <div className="app-shell">
       <div className="app-backdrop" />
@@ -357,6 +529,12 @@ function App() {
           setMapPopupPhase('opening');
         }}
       />
+      <PokeballWidget
+        onClick={() => {
+          playButtonSfx();
+          setIsTeamBuilderOpen(true);
+        }}
+      />
       <main className="app-container">
         <section id="regioes" className="pokedex-shell">
           <div className="pokedex-main">
@@ -370,8 +548,6 @@ function App() {
               <span className={detailLightActive ? 'dex-light dex-light-green is-active' : 'dex-light dex-light-green'} />
             </div>
 
-            <SearchPanel searchTerm={searchTerm} onChangeSearch={setSearchTerm} />
-
             <div className="pokedex-main-body">
               <div className="pokedex-screen-frame">
                 <div className="generation-content">
@@ -379,50 +555,50 @@ function App() {
                   {metaError ? <ErrorState label={metaError} /> : null}
 
                   {!loadingMeta && !metaError ? (
-                    currentGenerationState.status === 'error' ? (
-                      <ErrorState label={currentGenerationState.error} />
-                    ) : (
-                      <>
-                        {!currentGenerationState.data.length ? (
-                          <LoadingState label="Carregando primeiros cards da geracao..." />
-                        ) : null}
+                    <>
+                      {!currentGenerationEntries.length ? (
+                        <LoadingState label="Carregando primeiros cards da geracao..." />
+                      ) : null}
 
-                        {filteredPokemon.length ? (
-                          <div className="pokemon-grid">
-                            {filteredPokemon.map((pokemon) => (
-                              <PokemonGridCard
-                                key={pokemon.id}
-                                pokemon={pokemon}
-                                isActive={pokemon.id === selectedPokemonId}
-                                onSelect={handleSelectPokemon}
-                              />
-                            ))}
-                          </div>
-                        ) : null}
+                      {filteredPokemon.length ? (
+                        <div className="pokemon-grid">
+                          {filteredPokemon.map((pokemon) => (
+                            <PokemonGridCard
+                              key={pokemon.id}
+                              pokemon={pokemon}
+                              isActive={pokemon.id === selectedPokemonId}
+                              onSelect={handleSelectPokemon}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
 
-                        {normalizedSearch && !filteredPokemon.length && currentGenerationState.data.length ? (
-                          <ErrorState label="Nenhum Pokemon encontrado nessa busca." />
-                        ) : null}
-
-                        {currentGenerationState.status === 'loading' && currentGenerationState.data.length ? (
-                          <InlineLoadingState
-                            label={`Carregando mais Pokemon... ${currentGenerationState.loadedCount}/${currentGenerationState.total}`}
-                          />
-                        ) : null}
-                      </>
-                    )
+                      {normalizedSearch && !filteredPokemon.length && currentGenerationEntries.length ? (
+                        <ErrorState label="Nenhum Pokemon encontrado nessa busca." />
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               </div>
 
-              <div className="pokedex-controls" aria-hidden="true">
-                <span className="control-joystick" />
-                <div className="control-indicators">
+              <div className="pokedex-controls">
+                <span className="control-joystick" aria-hidden="true" />
+                <div className="control-indicators" aria-hidden="true">
                   <span className="control-indicator control-indicator-red" />
                   <span className="control-indicator control-indicator-blue" />
                 </div>
-                <span className="control-screen" />
-                <span className="control-dpad" />
+                <label className="control-screen" htmlFor="pokemon-search">
+                  <span className="sr-only">Buscar Pokemon por nome ou numero</span>
+                  <input
+                    id="pokemon-search"
+                    type="search"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Nome ou numero"
+                    autoComplete="off"
+                  />
+                </label>
+                <span className="control-dpad" aria-hidden="true" />
               </div>
             </div>
           </div>
@@ -441,11 +617,25 @@ function App() {
                 pokemon={selectedPokemon}
                 detailState={selectedPokemonDetailState}
                 currentGeneration={normalizedSearch ? selectedPokemon : currentGeneration}
+                teams={teams}
+                isQuickAddOpen={isQuickAddOpen}
+                onToggleQuickAdd={() => {
+                  playButtonSfx();
+                  setIsQuickAddOpen((current) => !current);
+                }}
+                onAddToTeam={(teamId) => {
+                  playButtonSfx();
+                  handleAddSelectedPokemonToTeam(teamId);
+                }}
+                onCreateTeam={() => {
+                  playButtonSfx();
+                  handleCreateTeam();
+                }}
               />
             </div>
 
             <div className="detail-button-grid" role="tablist" aria-label="Geracoes">
-                {generationMeta.map((generation) => (
+              {generationMeta.map((generation) => (
                 <button
                   key={generation.id}
                   type="button"
@@ -464,7 +654,7 @@ function App() {
                 >
                   <span>{generation.label}</span>
                 </button>
-                ))}
+              ))}
               <div
                 className={detailLightActive ? 'detail-button-circle is-active' : 'detail-button-circle'}
                 aria-hidden="true"
@@ -473,60 +663,100 @@ function App() {
           </aside>
         </section>
 
-        <footer id="footer" className="app-footer">
-          <div className="footer-credit">
-            <p>
-              Dados fornecidos pela{' '}
-              <a href="https://pokeapi.co/" target="_blank" rel="noreferrer">
-                PokéAPI
-              </a>
-              , criada por Paul Hallett e contribuidores ao redor do mundo. Pokemon e
-              nomes de personagens Pokemon sao marcas da Nintendo.
-            </p>
-            <p>
-              Documentacao oficial:{' '}
-              <a href="https://pokeapi.co/docs/v2" target="_blank" rel="noreferrer">
-                pokeapi.co/docs/v2
-              </a>
-            </p>
-          </div>
-
-          <div className="footer-contact">
-            <FooterLink
-              href="https://github.com/jpdevr"
-              label="GitHub"
-              icon={
-                <path d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.31 6.84 9.65.5.1.68-.22.68-.49 0-.24-.01-1.05-.01-1.91-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.9 1.56 2.35 1.11 2.92.85.09-.67.35-1.11.63-1.36-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.31.1-2.73 0 0 .84-.27 2.75 1.05A9.3 9.3 0 0 1 12 6.84c.85 0 1.7.12 2.5.36 1.9-1.32 2.74-1.05 2.74-1.05.56 1.42.21 2.47.1 2.73.64.72 1.03 1.64 1.03 2.76 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.89 0 1.37-.01 2.47-.01 2.8 0 .27.18.6.69.49A10.25 10.25 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z" />
-              }
-            />
-            <FooterLink
-              href="https://www.linkedin.com/in/jpdevr324/"
-              label="LinkedIn"
-              icon={
-                <>
-                  <path d="M6.94 8.5a1.44 1.44 0 1 1 0-2.88 1.44 1.44 0 0 1 0 2.88ZM5.7 10.05h2.48V18H5.7v-7.95Zm3.92 0h2.37v1.09h.03c.33-.63 1.14-1.3 2.35-1.3 2.52 0 2.99 1.67 2.99 3.84V18h-2.47v-3.83c0-.91-.02-2.08-1.26-2.08-1.27 0-1.47.99-1.47 2.02V18H9.62v-7.95Z" />
-                  <path d="M4 4h16v16H4z" fill="none" />
-                </>
-              }
-            />
-            <FooterLink
-              href="mailto:joaogapires@gmail.com"
-              label="joaogapires@gmail.com"
-              icon={
-                <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h14.5C20.22 5 21 5.78 21 6.75v10.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V6.75Zm1.8.1 7.2 5.26 7.2-5.26a.24.24 0 0 0-.2-.1H5a.24.24 0 0 0-.2.1Zm14.45 1.98-6.73 4.92a.9.9 0 0 1-1.04 0L4.75 8.83v8.42c0 .14.11.25.25.25h14a.25.25 0 0 0 .25-.25V8.83Z" />
-              }
-            />
-          </div>
-        </footer>
       </main>
+
+      <footer id="footer" className="app-footer">
+        <div className="footer-credit">
+          <p>
+            Dados fornecidos pela{' '}
+            <a href="https://pokeapi.co/" target="_blank" rel="noreferrer">
+              PokeAPI
+            </a>
+            , criada por Paul Hallett e contribuidores ao redor do mundo. Pokemon e nomes
+            de personagens Pokemon sao marcas da Nintendo.
+          </p>
+        </div>
+
+        <div className="footer-docs">
+          <p>Documentacao oficial</p>
+          <p>
+            <a href="https://pokeapi.co/docs/v2" target="_blank" rel="noreferrer">
+              pokeapi.co/docs/v2
+            </a>
+          </p>
+        </div>
+
+        <div className="footer-contact">
+          <FooterLink
+            href="https://github.com/jpdevr"
+            label="GitHub"
+            icon={
+              <path d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.31 6.84 9.65.5.1.68-.22.68-.49 0-.24-.01-1.05-.01-1.91-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.9 1.56 2.35 1.11 2.92.85.09-.67.35-1.11.63-1.36-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.31.1-2.73 0 0 .84-.27 2.75 1.05A9.3 9.3 0 0 1 12 6.84c.85 0 1.7.12 2.5.36 1.9-1.32 2.74-1.05 2.74-1.05.56 1.42.21 2.47.1 2.73.64.72 1.03 1.64 1.03 2.76 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.89 0 1.37-.01 2.47-.01 2.8 0 .27.18.6.69.49A10.25 10.25 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z" />
+            }
+          />
+          <FooterLink
+            href="https://www.linkedin.com/in/jpdevr324/"
+            label="LinkedIn"
+            icon={
+              <>
+                <path d="M6.94 8.5a1.44 1.44 0 1 1 0-2.88 1.44 1.44 0 0 1 0 2.88ZM5.7 10.05h2.48V18H5.7v-7.95Zm3.92 0h2.37v1.09h.03c.33-.63 1.14-1.3 2.35-1.3 2.52 0 2.99 1.67 2.99 3.84V18h-2.47v-3.83c0-.91-.02-2.08-1.26-2.08-1.27 0-1.47.99-1.47 2.02V18H9.62v-7.95Z" />
+                <path d="M4 4h16v16H4z" fill="none" />
+              </>
+            }
+          />
+          <FooterLink
+            href="mailto:joaogapires@gmail.com"
+            label="joaogapires@gmail.com"
+            icon={
+              <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h14.5C20.22 5 21 5.78 21 6.75v10.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V6.75Zm1.8.1 7.2 5.26 7.2-5.26a.24.24 0 0 0-.2-.1H5a.24.24 0 0 0-.2.1Zm14.45 1.98-6.73 4.92a.9.9 0 0 1-1.04 0L4.75 8.83v8.42c0 .14.11.25.25.25h14a.25.25 0 0 0 .25-.25V8.83Z" />
+            }
+          />
+        </div>
+      </footer>
+
+      <AudioDock
+        isMuted={isMuted}
+        volume={siteVolume}
+        onToggleMute={() => setIsMuted((current) => !current)}
+        onVolumeChange={(value) => setSiteVolume(value)}
+        onNextTrack={() => setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length)}
+      />
+
+      {isTeamBuilderOpen ? (
+        <TeamBuilderPopup
+          teams={teams}
+          selectedTeamId={selectedTeam?.id ?? null}
+          onSelectTeam={(teamId) => {
+            playButtonSfx();
+            setSelectedTeamId(teamId);
+          }}
+          onCreateTeam={() => {
+            playButtonSfx();
+            handleCreateTeam();
+          }}
+          onRenameTeam={handleRenameTeam}
+          onDeleteTeam={(teamId) => {
+            playButtonSfx();
+            handleDeleteTeam(teamId);
+          }}
+          onRemoveMember={(teamId, memberIndex) => {
+            playButtonSfx();
+            handleRemovePokemonFromTeam(teamId, memberIndex);
+          }}
+          onRequestClose={() => {
+            playButtonSfx();
+            setIsTeamBuilderOpen(false);
+          }}
+        />
+      ) : null}
 
       {isBagOpen ? (
         <BagPopup
           activeMenu={activeBagMenuData}
           inventoryState={activeBagDataState}
           selectedInventoryItem={activeBagSelectedItem}
-          canGoLeft={activeBagMenuIndex > 0}
-          canGoRight={activeBagMenuIndex < BAG_MENUS.length - 1}
+          canGoLeft={BAG_MENUS.length > 1}
+          canGoRight={BAG_MENUS.length > 1}
           onNavigate={handleBagNavigate}
           onSelectInventoryItem={(itemId) => {
             playButtonSfx();
@@ -668,9 +898,7 @@ function WorldMapPopup({ phase, onOpenComplete, onCloseComplete, onRequestClose 
             <img src={mapOpenLeftSprite} alt="" className="pixel-art" />
           </div>
 
-          <div className="map-popup-center">
-            <div className="map-popup-center-surface" />
-          </div>
+          <div className="map-popup-center" />
 
           <div className="map-popup-half map-popup-half-right" aria-hidden="true">
             <img src={mapOpenRightSprite} alt="" className="pixel-art" />
@@ -766,8 +994,8 @@ function BagInventoryPanel({ activeMenu, inventoryState, selectedItem, onSelectI
         : 'Item';
 
   return (
-    <div className={`bag-panel-card bag-panel-card-${activeMenu.id} bag-panel-card-list`}>
-      <div className="bag-panel-preview bag-panel-preview-item">
+    <div className={`bag-panel-card bag-panel-card-${activeMenu.id}`}>
+      <div className="bag-panel-preview">
         <div className="bag-preview-sidebar">
           <span className="bag-preview-rail" aria-hidden="true" />
           <strong className="bag-preview-title">{selectedItem?.displayName ?? menuLabel}</strong>
@@ -791,7 +1019,7 @@ function BagInventoryPanel({ activeMenu, inventoryState, selectedItem, onSelectI
         ) : null}
 
         {inventoryState.status === 'error' ? (
-          <div className="bag-panel-empty bag-panel-empty-error">
+          <div className="bag-panel-empty">
             <span>{inventoryState.error}</span>
           </div>
         ) : null}
@@ -847,7 +1075,16 @@ function PokemonGridCard({ pokemon, isActive, onSelect }) {
   );
 }
 
-function PokedexDetailPanel({ pokemon, detailState, currentGeneration }) {
+function PokedexDetailPanel({
+  pokemon,
+  detailState,
+  currentGeneration,
+  teams,
+  isQuickAddOpen,
+  onToggleQuickAdd,
+  onAddToTeam,
+  onCreateTeam,
+}) {
   const detail = detailState?.status === 'success' ? detailState.data : null;
 
   if (!pokemon) {
@@ -863,6 +1100,38 @@ function PokedexDetailPanel({ pokemon, detailState, currentGeneration }) {
   return (
     <div className="detail-screen-content">
       <span className="detail-id">#{formatId(pokemon.id)}</span>
+      <div className="detail-actions">
+        <button type="button" className="detail-add-button" onClick={onToggleQuickAdd} aria-label="Adicionar ao time">
+          +
+        </button>
+
+        {isQuickAddOpen ? (
+          <div className="detail-add-menu">
+            <strong>Adicionar ao time</strong>
+            <div className="detail-add-list">
+              {teams.map((team) => {
+                const isFull = team.members.length >= 6;
+
+                return (
+                  <button
+                    key={team.id}
+                    type="button"
+                    className="detail-add-option"
+                    onClick={() => onAddToTeam(team.id)}
+                    disabled={isFull}
+                  >
+                    <span>{team.name}</span>
+                    <small>{isFull ? 'Cheio' : `${team.members.length}/6`}</small>
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="detail-add-create" onClick={onCreateTeam}>
+              + Novo time
+            </button>
+          </div>
+        ) : null}
+      </div>
       <h2>{detail?.displayName ?? pokemon.displayName}</h2>
       <p className="detail-flavor">
         {detail?.flavor ?? 'Buscando descricao completa e registros da Pokedex...'}
@@ -904,20 +1173,6 @@ function PokedexDetailPanel({ pokemon, detailState, currentGeneration }) {
   );
 }
 
-function SearchPanel({ searchTerm, onChangeSearch }) {
-  return (
-    <div className="search-panel">
-      <input
-        id="pokemon-search"
-        type="search"
-        value={searchTerm}
-        onChange={(event) => onChangeSearch(event.target.value)}
-        placeholder="Nome ou numero"
-      />
-    </div>
-  );
-}
-
 function TypeBadge({ type }) {
   return (
     <span className="type-badge" style={{ '--type-color': TYPE_COLORS[type] ?? '#74828f' }}>
@@ -929,15 +1184,6 @@ function TypeBadge({ type }) {
 function LoadingState({ label }) {
   return (
     <div className="status-card">
-      <div className="spinner" />
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function InlineLoadingState({ label }) {
-  return (
-    <div className="inline-loading">
       <div className="spinner" />
       <span>{label}</span>
     </div>
@@ -962,6 +1208,69 @@ function FooterLink({ href, label, icon }) {
       </span>
       <span>{label}</span>
     </a>
+  );
+}
+
+function PokeballWidget({ onClick }) {
+  return (
+    <button type="button" className="pokeball-widget" aria-label="Abrir team builder" onClick={onClick}>
+      <span className="pokeball-sprite pokeball-sprite-closed">
+        <img src={pokeballCloseSprite} alt="" className="pixel-art" />
+      </span>
+      <span className="pokeball-sprite pokeball-sprite-hover">
+        <img src={pokeballSemiOpenSprite} alt="" className="pixel-art" />
+      </span>
+    </button>
+  );
+}
+
+function AudioDock({ isMuted, volume, onToggleMute, onVolumeChange, onNextTrack }) {
+  return (
+    <div className="audio-dock">
+      <div className="audio-panel">
+        <button type="button" className="audio-next" onClick={onNextTrack} aria-label="Passar para a proxima musica">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M6.5 6.25a.75.75 0 0 1 1.2-.6l7.3 5.6a.94.94 0 0 1 0 1.5l-7.3 5.6a.75.75 0 0 1-1.2-.6V6.25Z" />
+            <path d="M16.75 5.5a.75.75 0 0 1 1.5 0v13a.75.75 0 0 1-1.5 0v-13Z" />
+          </svg>
+        </button>
+
+        <label className="audio-slider" aria-label="Volume do site">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={volume}
+            onChange={(event) => onVolumeChange(Number(event.target.value))}
+            aria-label="Volume do site"
+          />
+        </label>
+      </div>
+
+      <button
+        type="button"
+        className="audio-toggle"
+        onClick={onToggleMute}
+        aria-label={isMuted ? 'Ativar som do site' : 'Mutar som do site'}
+        aria-pressed={isMuted}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          {isMuted ? (
+            <>
+              <path d="M14.5 4.5v15a.5.5 0 0 1-.84.36L8.8 15.5H5a1.5 1.5 0 0 1-1.5-1.5v-4A1.5 1.5 0 0 1 5 8.5h3.8l4.86-4.36a.5.5 0 0 1 .84.36Z" />
+              <path d="M18.03 8.56 15.59 11l2.44 2.44-1.06 1.06L14.53 12.06l-2.44 2.44-1.06-1.06L13.47 11l-2.44-2.44 1.06-1.06 2.44 2.44 2.44-2.44 1.06 1.06Z" />
+            </>
+          ) : (
+            <>
+              <path d="M14.5 4.5v15a.5.5 0 0 1-.84.36L8.8 15.5H5a1.5 1.5 0 0 1-1.5-1.5v-4A1.5 1.5 0 0 1 5 8.5h3.8l4.86-4.36a.5.5 0 0 1 .84.36Z" />
+              <path d="M17.36 8.03a.75.75 0 0 1 1.06 0 4.95 4.95 0 0 1 0 6.94.75.75 0 1 1-1.06-1.06 3.45 3.45 0 0 0 0-4.82.75.75 0 0 1 0-1.06Z" />
+              <path d="M19.92 5.47a.75.75 0 0 1 1.06 0 8.56 8.56 0 0 1 0 12.06.75.75 0 0 1-1.06-1.06 7.06 7.06 0 0 0 0-9.94.75.75 0 0 1 0-1.06Z" />
+            </>
+          )}
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -1255,7 +1564,7 @@ function playPokemonCry(url) {
   }
 
   const audio = new Audio(url);
-  audio.volume = 0.55;
+  audio.volume = getEffectVolume(0.8);
   audio.play().catch(() => {});
 }
 
@@ -1265,8 +1574,28 @@ function playButtonSfx() {
   }
 
   const audio = new Audio(buttonSfx);
-  audio.volume = 0.12;
+  audio.volume = getEffectVolume(0.28);
   audio.play().catch(() => {});
+}
+
+function getEffectVolume(multiplier = 1) {
+  if (audioSettings.muted) {
+    return 0;
+  }
+
+  return clampVolume(audioSettings.volume * multiplier);
+}
+
+function getAmbientVolume() {
+  if (audioSettings.muted) {
+    return 0;
+  }
+
+  return clampVolume(audioSettings.volume * 0.18);
+}
+
+function clampVolume(value) {
+  return Math.min(1, Math.max(0, value));
 }
 
 function getCardSprite(id) {
@@ -1275,6 +1604,20 @@ function getCardSprite(id) {
 
 function getStaticCardSprite(id) {
   return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/${id}.png`;
+}
+
+function buildTeamMemberSnapshot(pokemon, detailState, currentGeneration) {
+  const detail = detailState?.status === 'success' ? detailState.data : null;
+
+  return {
+    id: `${pokemon.id}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+    pokemonId: pokemon.id,
+    name: pokemon.name,
+    displayName: detail?.displayName ?? pokemon.displayName,
+    sprite: detail?.image ?? getCardSprite(pokemon.id),
+    types: detail?.types ?? [],
+    generationLabel: currentGeneration?.generationLabel ?? currentGeneration?.label ?? 'Dex',
+  };
 }
 
 function handleCardSpriteError(event) {
