@@ -21,15 +21,23 @@ export default function TeamBuilderPopup({
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
   const summary = buildTeamSummary(selectedTeam?.members ?? []);
   const [pendingChampionKey, setPendingChampionKey] = useState(null);
+  const [isSubmittingBattle, setIsSubmittingBattle] = useState(false);
   const pendingChampion = useMemo(
     () => CHAMPIONS.find((champion) => champion.key === pendingChampionKey) ?? null,
     [pendingChampionKey],
   );
   const canStartBattle = (selectedTeam?.members.length ?? 0) > 0;
+  const isBattleBusy = battleLaunchState === 'loading' || isSubmittingBattle;
+
+  useEffect(() => {
+    if (battleLaunchState !== 'loading') {
+      setIsSubmittingBattle(false);
+    }
+  }, [battleLaunchState]);
 
   useEffect(() => {
     function handleEscape(event) {
-      if (event.key === 'Escape' && battleLaunchState !== 'ready') {
+      if (event.key === 'Escape' && battleLaunchState !== 'ready' && battleLaunchState !== 'loading') {
         onRequestClose();
       }
     }
@@ -38,8 +46,27 @@ export default function TeamBuilderPopup({
     return () => window.removeEventListener('keydown', handleEscape);
   }, [battleLaunchState, onRequestClose]);
 
+  async function handleConfirmBattle() {
+    if (!pendingChampion || !canStartBattle || isBattleBusy) {
+      return;
+    }
+
+    setIsSubmittingBattle(true);
+
+    try {
+      await onStartBattle(pendingChampion.key);
+      setPendingChampionKey(null);
+    } finally {
+      setIsSubmittingBattle(false);
+    }
+  }
+
   return (
-    <div className="team-builder-layer" role="presentation" onClick={onRequestClose}>
+    <div
+      className="team-builder-layer"
+      role="presentation"
+      onClick={isBattleBusy ? undefined : onRequestClose}
+    >
       <div className="team-builder-dialog" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
@@ -50,6 +77,7 @@ export default function TeamBuilderPopup({
           onFocus={() => onCloseHoverChange(true)}
           onBlur={() => onCloseHoverChange(false)}
           aria-label="Fechar team builder"
+          disabled={isBattleBusy}
         >
           x
         </button>
@@ -190,17 +218,19 @@ export default function TeamBuilderPopup({
               {!canStartBattle ? <small>Adicione pelo menos um Pokemon ao time antes de batalhar.</small> : null}
               {battleLaunchError ? <small>{battleLaunchError}</small> : null}
               <div className="team-builder-battle-actions">
-                <button type="button" className="team-builder-battle-cancel" onClick={() => setPendingChampionKey(null)}>
+                <button
+                  type="button"
+                  className="team-builder-battle-cancel"
+                  onClick={() => setPendingChampionKey(null)}
+                  disabled={isBattleBusy}
+                >
                   Cancelar
                 </button>
                 <button
                   type="button"
                   className="team-builder-battle-start"
-                  onClick={() => {
-                    onStartBattle(pendingChampion.key);
-                    setPendingChampionKey(null);
-                  }}
-                  disabled={!canStartBattle || battleLaunchState === 'loading'}
+                  onClick={handleConfirmBattle}
+                  disabled={!canStartBattle || isBattleBusy}
                 >
                   {battleLaunchState === 'loading' ? 'Montando...' : 'Confirmar'}
                 </button>

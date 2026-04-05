@@ -69,7 +69,8 @@ img {
 .app-shell {
   position: relative;
   min-height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .app-backdrop {
@@ -2136,6 +2137,177 @@ img {
   cursor: not-allowed;
 }
 
+.battle-launch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow: hidden;
+  pointer-events: all;
+}
+
+.battle-launch-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, rgba(42, 53, 81, 0.08) 0%, rgba(5, 10, 20, 0.72) 45%, rgba(2, 5, 12, 0.96) 100%);
+  opacity: 0;
+  transition: opacity 140ms linear;
+}
+
+.battle-launch-overlay-covering::before,
+.battle-launch-overlay-landing::before,
+.battle-launch-overlay-holding::before,
+.battle-launch-overlay-opening::before {
+  opacity: 1;
+}
+
+.battle-launch-overlay-opening::before {
+  animation: battleLaunchDarknessFade 760ms ease forwards;
+}
+
+.battle-launch-stripes {
+  position: absolute;
+  inset: 0;
+}
+
+.battle-launch-stripe {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: calc((100% / 9) + 2px);
+  top: calc(var(--stripe-index) * (100% / 9));
+  background:
+    linear-gradient(90deg, rgba(73, 90, 126, 0.2) 0%, rgba(11, 16, 30, 0.92) 14%, rgba(4, 7, 15, 0.98) 58%, rgba(0, 0, 0, 1) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(149, 176, 237, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+  will-change: transform;
+}
+
+.battle-launch-stripe.from-left {
+  transform: translateX(-112%);
+}
+
+.battle-launch-stripe.from-right {
+  transform: translateX(112%);
+}
+
+.battle-launch-overlay-covering .battle-launch-stripe {
+  animation-duration: 560ms;
+  animation-timing-function: cubic-bezier(0.72, 0.02, 0.19, 1);
+  animation-fill-mode: forwards;
+  animation-delay: calc(var(--stripe-index) * 56ms);
+}
+
+.battle-launch-overlay-covering .battle-launch-stripe.from-left {
+  animation-name: battleLaunchStripeFromLeft;
+}
+
+.battle-launch-overlay-covering .battle-launch-stripe.from-right {
+  animation-name: battleLaunchStripeFromRight;
+}
+
+.battle-launch-overlay-landing .battle-launch-stripe,
+.battle-launch-overlay-holding .battle-launch-stripe,
+.battle-launch-overlay-opening .battle-launch-stripe {
+  transform: translateX(0);
+}
+
+.battle-launch-overlay-opening .battle-launch-stripes {
+  animation: battleLaunchStripesFade 760ms ease forwards;
+}
+
+.battle-launch-pokeball-shell {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: min(38vw, 320px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(0.18);
+  opacity: 0;
+}
+
+.battle-launch-overlay-landing .battle-launch-pokeball-shell {
+  animation: battleLaunchPokeballLand 880ms cubic-bezier(0.18, 0.86, 0.24, 1) forwards;
+}
+
+.battle-launch-overlay-holding .battle-launch-pokeball-shell,
+.battle-launch-overlay-opening .battle-launch-pokeball-shell {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+.battle-launch-pokeball-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  width: 74%;
+  height: 15%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0.22) 52%, transparent 78%);
+  transform: translateX(-50%) scale(0.65);
+  opacity: 0;
+}
+
+.battle-launch-overlay-landing .battle-launch-pokeball-shadow {
+  animation: battleLaunchShadowLand 880ms ease-out forwards;
+}
+
+.battle-launch-overlay-holding .battle-launch-pokeball-shadow {
+  opacity: 0.72;
+  transform: translateX(-50%) scale(1);
+}
+
+.battle-launch-overlay-opening .battle-launch-pokeball-shadow {
+  animation: battleLaunchShadowFade 760ms ease forwards;
+}
+
+.battle-launch-pokeball {
+  position: absolute;
+  inset: 0;
+}
+
+.battle-launch-pokeball-half {
+  position: absolute;
+  inset: 0;
+}
+
+.battle-launch-pokeball-half img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.battle-launch-pokeball-top {
+  transform-origin: center bottom;
+  clip-path: inset(0 0 50% 0);
+}
+
+.battle-launch-pokeball-top img {
+  object-position: top center;
+}
+
+.battle-launch-pokeball-bottom {
+  transform-origin: center top;
+  clip-path: inset(50% 0 0 0);
+}
+
+.battle-launch-pokeball-bottom img {
+  object-position: bottom center;
+}
+
+.battle-launch-overlay-opening .battle-launch-pokeball-top {
+  animation: battleLaunchPokeballTopOpen 760ms cubic-bezier(0.2, 0.68, 0.18, 1) forwards;
+}
+
+.battle-launch-overlay-opening .battle-launch-pokeball-bottom {
+  animation: battleLaunchPokeballBottomOpen 760ms cubic-bezier(0.2, 0.68, 0.18, 1) forwards;
+}
+
 .battle-layer {
   position: fixed;
   inset: 0;
@@ -2143,8 +2315,25 @@ img {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.52);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+.battle-close-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  pointer-events: all;
+  background: #000;
+}
+
+.battle-close-overlay-darkening {
+  animation: battleCloseFadeIn 420ms ease forwards;
+}
+
+.battle-close-overlay-revealing {
+  opacity: 1;
+  animation: battleCloseFadeOut 420ms ease forwards;
 }
 
 .battle-popup {
@@ -3047,5 +3236,129 @@ img {
   }
   100% {
     transform: translateX(0) translateY(0) scale(1);
+  }
+}
+
+@keyframes battleLaunchStripeFromLeft {
+  0% {
+    transform: translateX(-112%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes battleLaunchStripeFromRight {
+  0% {
+    transform: translateX(112%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes battleLaunchStripesFade {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes battleLaunchPokeballLand {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.18) rotate(-24deg);
+  }
+  48% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1) rotate(10deg);
+  }
+  70% {
+    transform: translate(-50%, -50%) scale(0.94) rotate(-8deg);
+  }
+  84% {
+    transform: translate(-50%, -50%) scale(1.03) rotate(4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes battleLaunchShadowLand {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.35);
+  }
+  55% {
+    opacity: 0.9;
+    transform: translateX(-50%) scale(1.08);
+  }
+  100% {
+    opacity: 0.72;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes battleLaunchShadowFade {
+  0% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes battleLaunchPokeballTopOpen {
+  0% {
+    transform: translateY(0) scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-42vh) scaleY(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes battleLaunchPokeballBottomOpen {
+  0% {
+    transform: translateY(0) scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(42vh) scaleY(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes battleLaunchDarknessFade {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes battleCloseFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes battleCloseFadeOut {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }

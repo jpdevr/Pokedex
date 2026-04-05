@@ -46,6 +46,13 @@ const INITIAL_BAG_MENU_STATE = {
 };
 const MENU_TRACKS = [menu1Sfx, menu2Sfx, menu3Sfx];
 const BATTLE_TRACKS = [battle1Sfx, battle2Sfx, battle3Sfx, battle4Sfx];
+const BATTLE_LAUNCH_STRIPE_COUNT = 9;
+const BATTLE_LAUNCH_TIMINGS = {
+  stripes: 1060,
+  landing: 880,
+  opening: 760,
+};
+const BATTLE_CLOSE_FADE_DURATION = 420;
 const audioSettings = {
   muted: false,
   volume: 0.6,
@@ -136,6 +143,11 @@ function App() {
     error: '',
     config: null,
   });
+  const [battleLaunchTransition, setBattleLaunchTransition] = useState({
+    status: 'idle',
+    championKey: null,
+  });
+  const [battleCloseTransition, setBattleCloseTransition] = useState('idle');
   const [bagData, setBagData] = useState(() => ({
     items: { ...INITIAL_BAG_MENU_STATE },
     'key-items': { ...INITIAL_BAG_MENU_STATE },
@@ -585,9 +597,14 @@ function App() {
   }
 
   async function handleStartBattle(championKey) {
-    if (!selectedTeam?.members.length) {
+    if (!selectedTeam?.members.length || battleState.status === 'loading' || battleLaunchTransition.status !== 'idle') {
       return;
     }
+
+    const nextTrackIndex = pickNextBattleTrackIndex(BATTLE_TRACKS.length, lastBattleTrackIndexRef.current);
+    lastBattleTrackIndexRef.current = nextTrackIndex;
+    setBattleTrackIndex(nextTrackIndex);
+    setAudioMode('battle');
 
     setBattleState({
       status: 'loading',
@@ -595,21 +612,25 @@ function App() {
       error: '',
       config: null,
     });
+    setBattleLaunchTransition({
+      status: 'covering',
+      championKey,
+    });
 
     try {
       const config = await buildBattleSetup(championKey, selectedTeam.members);
-      const nextTrackIndex = pickNextBattleTrackIndex(BATTLE_TRACKS.length, lastBattleTrackIndexRef.current);
-
-      lastBattleTrackIndexRef.current = nextTrackIndex;
-      setBattleTrackIndex(nextTrackIndex);
-      setAudioMode('battle');
       setBattleState({
-        status: 'ready',
+        status: 'loading',
         championKey,
         error: '',
         config,
       });
     } catch (error) {
+      setAudioMode('menu');
+      setBattleLaunchTransition({
+        status: 'idle',
+        championKey: null,
+      });
       setBattleState({
         status: 'error',
         championKey,
@@ -620,6 +641,10 @@ function App() {
   }
 
   function handleCloseBattle() {
+    setBattleLaunchTransition({
+      status: 'idle',
+      championKey: null,
+    });
     setBattleState({
       status: 'idle',
       championKey: null,
@@ -628,6 +653,115 @@ function App() {
     });
     setAudioMode('menu');
   }
+
+  function requestCloseBattle() {
+    if (battleCloseTransition !== 'idle') {
+      return;
+    }
+
+    setBattleCloseTransition('darkening');
+  }
+
+  useEffect(() => {
+    if (battleLaunchTransition.status !== 'covering') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBattleLaunchTransition((current) =>
+        current.status === 'covering'
+          ? {
+              ...current,
+              status: 'landing',
+            }
+          : current,
+      );
+    }, BATTLE_LAUNCH_TIMINGS.stripes);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [battleLaunchTransition.status]);
+
+  useEffect(() => {
+    if (battleLaunchTransition.status !== 'landing') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBattleLaunchTransition((current) =>
+        current.status === 'landing'
+          ? {
+              ...current,
+              status: 'holding',
+            }
+          : current,
+      );
+    }, BATTLE_LAUNCH_TIMINGS.landing);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [battleLaunchTransition.status]);
+
+  useEffect(() => {
+    if (battleLaunchTransition.status !== 'holding' || !battleState.config) {
+      return;
+    }
+
+    setBattleState((current) =>
+      current.config
+        ? {
+            ...current,
+            status: 'ready',
+          }
+        : current,
+    );
+    setBattleLaunchTransition((current) =>
+      current.status === 'holding'
+        ? {
+            ...current,
+            status: 'opening',
+          }
+        : current,
+    );
+  }, [battleLaunchTransition.status, battleState.config]);
+
+  useEffect(() => {
+    if (battleLaunchTransition.status !== 'opening') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBattleLaunchTransition({
+        status: 'idle',
+        championKey: null,
+      });
+    }, BATTLE_LAUNCH_TIMINGS.opening);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [battleLaunchTransition.status]);
+
+  useEffect(() => {
+    if (battleCloseTransition !== 'darkening') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      handleCloseBattle();
+      setBattleCloseTransition('revealing');
+    }, BATTLE_CLOSE_FADE_DURATION);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [battleCloseTransition]);
+
+  useEffect(() => {
+    if (battleCloseTransition !== 'revealing') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBattleCloseTransition('idle');
+    }, BATTLE_CLOSE_FADE_DURATION);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [battleCloseTransition]);
 
   return (
     <div className="app-shell">
@@ -901,13 +1035,21 @@ function App() {
             onButtonClick={playButtonSfx}
             onClose={() => {
               playButtonSfx();
-              handleCloseBattle();
+              requestCloseBattle();
             }}
             onComplete={() => {
-              handleCloseBattle();
+              requestCloseBattle();
             }}
           />
         </Suspense>
+      ) : null}
+
+      {battleLaunchTransition.status !== 'idle' ? (
+        <BattleLaunchTransitionOverlay phase={battleLaunchTransition.status} />
+      ) : null}
+
+      {battleCloseTransition !== 'idle' ? (
+        <BattleCloseTransitionOverlay phase={battleCloseTransition} />
       ) : null}
 
       {isBagOpen ? (
@@ -1367,6 +1509,38 @@ function OverlayLoading({ label }) {
       </div>
     </div>
   );
+}
+
+function BattleLaunchTransitionOverlay({ phase }) {
+  return (
+    <div className={`battle-launch-overlay battle-launch-overlay-${phase}`} role="presentation" aria-hidden="true">
+      <div className="battle-launch-stripes">
+        {Array.from({ length: BATTLE_LAUNCH_STRIPE_COUNT }, (_, index) => (
+          <span
+            key={`battle-launch-stripe-${index}`}
+            className={index % 2 === 0 ? 'battle-launch-stripe from-left' : 'battle-launch-stripe from-right'}
+            style={{ '--stripe-index': index }}
+          />
+        ))}
+      </div>
+
+      <div className="battle-launch-pokeball-shell">
+        <span className="battle-launch-pokeball-shadow" />
+        <div className="battle-launch-pokeball">
+          <span className="battle-launch-pokeball-half battle-launch-pokeball-top">
+            <img src={pokeballCloseSprite} alt="" className="pixel-art" />
+          </span>
+          <span className="battle-launch-pokeball-half battle-launch-pokeball-bottom">
+            <img src={pokeballCloseSprite} alt="" className="pixel-art" />
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BattleCloseTransitionOverlay({ phase }) {
+  return <div className={`battle-close-overlay battle-close-overlay-${phase}`} role="presentation" aria-hidden="true" />;
 }
 
 function FooterLink({ href, label, icon }) {
