@@ -22,14 +22,27 @@ export function cleanText(text) {
   return text.replace(/\f|\n|\r/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export function getAnimatedPixelSprite(pokemon) {
-  return (
-    pokemon.sprites.versions?.['generation-v']?.['black-white']?.animated?.front_default ??
-    pokemon.sprites.other?.showdown?.front_default ??
-    pokemon.sprites.versions?.['generation-v']?.['black-white']?.front_default ??
-    pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.front_default ??
-    pokemon.sprites.front_default
-  );
+export function getAnimatedPixelSprite(pokemon, options = {}) {
+  const { shiny = false } = options;
+
+  return shiny
+    ? (
+        pokemon.sprites.versions?.['generation-v']?.['black-white']?.animated?.front_shiny ??
+        pokemon.sprites.other?.showdown?.front_shiny ??
+        pokemon.sprites.versions?.['generation-v']?.['black-white']?.front_shiny ??
+        pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.front_shiny ??
+        pokemon.sprites.front_shiny ??
+        pokemon.sprites.other?.['official-artwork']?.front_shiny ??
+        getAnimatedPixelSprite(pokemon)
+      )
+    : (
+        pokemon.sprites.versions?.['generation-v']?.['black-white']?.animated?.front_default ??
+        pokemon.sprites.other?.showdown?.front_default ??
+        pokemon.sprites.versions?.['generation-v']?.['black-white']?.front_default ??
+        pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.front_default ??
+        pokemon.sprites.front_default ??
+        pokemon.sprites.other?.['official-artwork']?.front_default
+      );
 }
 
 export function getBattleFrontSprite(pokemon) {
@@ -43,8 +56,12 @@ export function getBattleBackSprite(pokemon) {
     pokemon.sprites.versions?.['generation-v']?.['black-white']?.back_default ??
     pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.back_default ??
     pokemon.sprites.back_default ??
-    pokemon.sprites.versions?.['generation-v']?.['black-white']?.front_default ??
-    pokemon.sprites.front_default
+    pokemon.sprites.versions?.['generation-v']?.['black-white']?.animated?.back_shiny ??
+    pokemon.sprites.other?.showdown?.back_shiny ??
+    pokemon.sprites.versions?.['generation-v']?.['black-white']?.back_shiny ??
+    pokemon.sprites.versions?.['generation-iv']?.['heartgold-soulsilver']?.back_shiny ??
+    pokemon.sprites.back_shiny ??
+    getAnimatedPixelSprite(pokemon)
   );
 }
 

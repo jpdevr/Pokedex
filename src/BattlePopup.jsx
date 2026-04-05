@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import pokeballClose from './assets/PokeballClose.png';
+import pokeballOpen from './assets/PokeballOpen.png';
+import pokeballSemiOpen from './assets/PokeballSemiOpen.png';
 import { championSprites } from './championSprites';
 import { capitalize } from './pokemonHelpers';
 import { TYPE_COLORS, getTypeMultiplier } from './typeData';
@@ -8,10 +10,22 @@ const ATTACK_ANNOUNCE_DELAY_MS = 0;
 const EFFECT_MESSAGE_DELAY_MS = 0;
 const HP_DROP_DELAY_MS = 0;
 const FAINT_MESSAGE_DELAY_MS = 0;
+const BATTLE_INTRO_SEQUENCE = [
+  { key: 'enemy-trainer-enter', delay: 760 },
+  { key: 'enemy-pokeball-throw', delay: 720 },
+  { key: 'enemy-pokemon-materialize', delay: 860 },
+  { key: 'enemy-status-reveal', delay: 320 },
+  { key: 'player-pokeball-throw', delay: 640 },
+  { key: 'player-pokemon-materialize', delay: 860 },
+  { key: 'player-status-reveal', delay: 320 },
+  { key: 'complete', delay: 0 },
+];
 
 export default function BattlePopup({ battleConfig, onClose, onComplete, onButtonClick = () => {} }) {
   const [battleState, setBattleState] = useState(() => createInitialBattleState(battleConfig));
+  const [introPhase, setIntroPhase] = useState('initial');
   const cryAudioRef = useRef(null);
+  const introTimeoutsRef = useRef([]);
 
   function handleUiButtonClick(callback) {
     onButtonClick();
@@ -20,27 +34,51 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
 
   useEffect(() => {
     setBattleState(createInitialBattleState(battleConfig));
+    setIntroPhase('initial');
   }, [battleConfig]);
 
   useEffect(() => {
     function handleEscape(event) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && introPhase === 'complete') {
         onClose();
       }
     }
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [introPhase, onClose]);
 
   useEffect(() => {
     return () => {
+      introTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      introTimeoutsRef.current = [];
+
       if (cryAudioRef.current) {
         cryAudioRef.current.pause();
         cryAudioRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    introTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    introTimeoutsRef.current = [];
+
+    let accumulatedDelay = 0;
+
+    BATTLE_INTRO_SEQUENCE.forEach((step) => {
+      accumulatedDelay += step.delay;
+      const timeoutId = window.setTimeout(() => {
+        setIntroPhase(step.key);
+      }, accumulatedDelay);
+      introTimeoutsRef.current.push(timeoutId);
+    });
+
+    return () => {
+      introTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      introTimeoutsRef.current = [];
+    };
+  }, [battleConfig]);
 
   useEffect(() => {
     if (!battleState.pendingCryUrl) {
@@ -50,6 +88,20 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
     playCry(battleState.pendingCryUrl, cryAudioRef);
     return undefined;
   }, [battleState.pendingCryToken, battleState.pendingCryUrl]);
+
+  useEffect(() => {
+    const introEnemy = battleState.enemyTeam[battleState.activeEnemyIndex];
+    const introPlayer = battleState.playerTeam[battleState.activePlayerIndex];
+
+    if (introPhase === 'enemy-pokemon-materialize' && introEnemy?.cryUrl) {
+      playCry(introEnemy.cryUrl, cryAudioRef);
+      return;
+    }
+
+    if (introPhase === 'player-pokemon-materialize' && introPlayer?.cryUrl) {
+      playCry(introPlayer.cryUrl, cryAudioRef);
+    }
+  }, [battleState.activeEnemyIndex, battleState.activePlayerIndex, battleState.enemyTeam, battleState.playerTeam, introPhase]);
 
   useEffect(() => {
     if (!battleState.result) {
@@ -71,48 +123,101 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
   const enemyActive = battleState.enemyTeam[battleState.activeEnemyIndex];
   const championSprite = championSprites[battleConfig.champion.key] ?? null;
   const isBusy = battleState.busy || battleState.eventQueue.length > 0;
+  const isIntroComplete = introPhase === 'complete';
+  const areInteractionsLocked = !isIntroComplete || isBusy;
   const showPlayerParty = battleState.view === 'root' && !battleState.forceSwitch;
   const pendingEnemy = typeof battleState.pendingEnemyIndex === 'number'
     ? battleState.enemyTeam[battleState.pendingEnemyIndex]
     : null;
+  const showEnemyTrainer = hasReachedIntroPhase(introPhase, 'enemy-trainer-enter');
+  const showEnemyPokeball = introPhase === 'enemy-pokeball-throw';
+  const showEnemyPokemon = hasReachedIntroPhase(introPhase, 'enemy-pokemon-materialize');
+  const showEnemyStatus = hasReachedIntroPhase(introPhase, 'enemy-status-reveal');
+  const showPlayerPokeball = introPhase === 'player-pokeball-throw';
+  const showPlayerPokemon = hasReachedIntroPhase(introPhase, 'player-pokemon-materialize');
+  const showPlayerStatus = hasReachedIntroPhase(introPhase, 'player-status-reveal');
+  const enemyTrainerClassName = [
+    'battle-trainer',
+    'battle-trainer-enemy',
+    'pixel-art',
+    introPhase === 'enemy-trainer-enter' ? 'enemy-trainer-enter' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const enemySpriteClassName = [
+    'battle-sprite',
+    'battle-sprite-enemy',
+    'pixel-art',
+    battleState.activeActor === 'enemy' && isIntroComplete ? 'is-attacking' : '',
+    introPhase === 'enemy-pokemon-materialize' ? 'enemy-pokemon-materialize' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const playerSpriteClassName = [
+    'battle-sprite',
+    'battle-sprite-player',
+    'pixel-art',
+    battleState.activeActor === 'player' && isIntroComplete ? 'is-attacking' : '',
+    introPhase === 'player-pokemon-materialize' ? 'player-pokemon-materialize' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className="battle-layer" role="presentation">
       <div className="battle-popup" role="dialog" aria-modal="true" aria-label={`Batalha contra ${battleConfig.champion.label}`}>
-        <button type="button" className="battle-close" onClick={() => handleUiButtonClick(onClose)} aria-label="Sair da batalha">
+        <button
+          type="button"
+          className="battle-close"
+          onClick={() => handleUiButtonClick(onClose)}
+          aria-label="Sair da batalha"
+          disabled={!isIntroComplete}
+        >
           x
         </button>
 
         <div className="battle-stage">
           <div className="battle-enemy-hud">
-            <div key={enemyActive.battleId} className="battle-status battle-status-enemy">
-              <div className="battle-status-head">
-                <strong>{enemyActive.displayName}</strong>
-                <span>Lv. {enemyActive.level}</span>
-              </div>
-              <BattleHealthBar currentHp={enemyActive.displayHp} maxHp={enemyActive.maxHp} />
-              <small>{battleConfig.champion.label}</small>
+            <div key={enemyActive.battleId} className={showEnemyStatus ? 'battle-status battle-status-enemy status-reveal' : 'battle-status battle-status-enemy is-empty'}>
+              {showEnemyStatus ? (
+                <>
+                  <div className="battle-status-head">
+                    <strong>{enemyActive.displayName}</strong>
+                    <span>Lv. {enemyActive.level}</span>
+                  </div>
+                  <BattleHealthBar currentHp={enemyActive.displayHp} maxHp={enemyActive.maxHp} />
+                  <small>{battleConfig.champion.label}</small>
+                </>
+              ) : (
+                <BattleStatusEmpty />
+              )}
             </div>
             <BattlePartyDots team={battleState.enemyTeam} align="left" />
           </div>
 
           <div className="battle-arena battle-arena-enemy" aria-hidden="true">
             <span className="battle-platform battle-platform-enemy" />
-            {championSprite ? <img src={championSprite} alt="" className="battle-trainer battle-trainer-enemy pixel-art" /> : null}
-            <img
-              src={enemyActive.spriteFront}
-              alt={enemyActive.displayName}
-              className={battleState.activeActor === 'enemy' ? 'battle-sprite battle-sprite-enemy pixel-art is-attacking' : 'battle-sprite battle-sprite-enemy pixel-art'}
-            />
+            {championSprite && showEnemyTrainer ? <img src={championSprite} alt="" className={enemyTrainerClassName} /> : null}
+            {showEnemyPokeball ? <BattleThrowPokeball side="enemy" /> : null}
+            {showEnemyPokemon ? (
+              <img
+                src={enemyActive.spriteFront}
+                alt={enemyActive.displayName}
+                className={enemySpriteClassName}
+              />
+            ) : null}
           </div>
 
           <div className="battle-arena battle-arena-player" aria-hidden="true">
             <span className="battle-platform battle-platform-player" />
-            <img
-              src={playerActive.spriteBack}
-              alt={playerActive.displayName}
-              className={battleState.activeActor === 'player' ? 'battle-sprite battle-sprite-player pixel-art is-attacking' : 'battle-sprite battle-sprite-player pixel-art'}
-            />
+            {showPlayerPokeball ? <BattleThrowPokeball side="player" /> : null}
+            {showPlayerPokemon ? (
+              <img
+                src={playerActive.spriteBack}
+                alt={playerActive.displayName}
+                className={playerSpriteClassName}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -130,7 +235,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                         setBattleState((current) => ({ ...current, view: 'root', message: `O que ${playerActive.displayName} vai fazer?` })),
                       )
                     }
-                    disabled={isBusy}
+                    disabled={areInteractionsLocked}
                   >
                     Voltar
                   </button>
@@ -144,6 +249,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                         setBattleState((current) => advanceBattleSequence(current)),
                       )
                     }
+                    disabled={!isIntroComplete}
                   >
                     A
                   </button>
@@ -154,13 +260,19 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
 
           <div className="battle-bottom-column battle-bottom-right">
           <div className="battle-side-ui">
-            <div key={playerActive.battleId} className="battle-status battle-status-player">
-              <div className="battle-status-head">
-                <strong>{playerActive.displayName}</strong>
-                <span>Lv. {playerActive.level}</span>
-              </div>
-              <BattleHealthBar currentHp={playerActive.displayHp} maxHp={playerActive.maxHp} />
-              <small>{playerActive.displayHp}/{playerActive.maxHp} HP</small>
+            <div key={playerActive.battleId} className={showPlayerStatus ? 'battle-status battle-status-player status-reveal' : 'battle-status battle-status-player is-empty'}>
+              {showPlayerStatus ? (
+                <>
+                  <div className="battle-status-head">
+                    <strong>{playerActive.displayName}</strong>
+                    <span>Lv. {playerActive.level}</span>
+                  </div>
+                  <BattleHealthBar currentHp={playerActive.displayHp} maxHp={playerActive.maxHp} />
+                  <small>{playerActive.displayHp}/{playerActive.maxHp} HP</small>
+                </>
+              ) : (
+                <BattleStatusEmpty />
+              )}
             </div>
 
             <div className="battle-controls">
@@ -175,7 +287,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                           setBattleState((current) => ({ ...current, view: 'fight', message: `Escolha um ataque para ${playerActive.displayName}.` })),
                         )
                       }
-                      disabled={battleState.forceSwitch || Boolean(battleState.result) || isBusy}
+                      disabled={battleState.forceSwitch || Boolean(battleState.result) || areInteractionsLocked}
                     >
                       Atacar
                     </button>
@@ -187,7 +299,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                           setBattleState((current) => ({ ...current, view: 'switch', message: 'Escolha quem vai entrar.' })),
                         )
                       }
-                      disabled={Boolean(battleState.result) || isBusy}
+                      disabled={Boolean(battleState.result) || areInteractionsLocked}
                     >
                       Trocar
                     </button>
@@ -210,7 +322,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                         })),
                       )
                     }
-                    disabled={Boolean(battleState.result) || isBusy}
+                    disabled={Boolean(battleState.result) || areInteractionsLocked}
                   >
                     Sim
                   </button>
@@ -222,7 +334,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                         setBattleState((current) => queueEnemySendOut(current)),
                       )
                     }
-                    disabled={Boolean(battleState.result) || isBusy}
+                    disabled={Boolean(battleState.result) || areInteractionsLocked}
                   >
                     Nao
                   </button>
@@ -242,7 +354,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                           setBattleState((current) => queueAttackTurn(current, index, battleConfig.champion.label)),
                         )
                       }
-                      disabled={Boolean(battleState.result) || isBusy}
+                      disabled={Boolean(battleState.result) || areInteractionsLocked}
                     >
                       <span>{move.displayName}</span>
                       <small>{capitalize(move.type)}</small>
@@ -271,7 +383,7 @@ export default function BattlePopup({ battleConfig, onClose, onComplete, onButto
                             ),
                           )
                         }
-                        disabled={isActive || isFainted || Boolean(battleState.result) || isBusy}
+                        disabled={isActive || isFainted || Boolean(battleState.result) || areInteractionsLocked}
                       >
                         <span>{member.displayName}</span>
                         <small>{isFainted ? 'Sem HP' : `${member.displayHp}/${member.maxHp}`}</small>
@@ -301,6 +413,42 @@ function BattleHealthBar({ currentHp, maxHp }) {
       </div>
     </div>
   );
+}
+
+function BattleStatusEmpty() {
+  return (
+    <div className="battle-status-empty" aria-hidden="true">
+      <span className="battle-status-empty-line battle-status-empty-line-title" />
+      <span className="battle-status-empty-line battle-status-empty-line-level" />
+      <span className="battle-status-empty-line battle-status-empty-line-hp" />
+      <span className="battle-status-empty-line battle-status-empty-line-meta" />
+    </div>
+  );
+}
+
+function BattleThrowPokeball({ side }) {
+  return (
+    <div className={side === 'enemy' ? 'battle-throw battle-throw-enemy' : 'battle-throw battle-throw-player'}>
+      <img src={pokeballClose} alt="" className="battle-throw-frame battle-throw-frame-close pixel-art" />
+      <img src={pokeballSemiOpen} alt="" className="battle-throw-frame battle-throw-frame-semi pixel-art" />
+      <img src={pokeballOpen} alt="" className="battle-throw-frame battle-throw-frame-open pixel-art" />
+    </div>
+  );
+}
+
+function hasReachedIntroPhase(currentPhase, targetPhase) {
+  const currentIndex = BATTLE_INTRO_SEQUENCE.findIndex((step) => step.key === currentPhase);
+  const targetIndex = BATTLE_INTRO_SEQUENCE.findIndex((step) => step.key === targetPhase);
+
+  if (currentPhase === 'initial') {
+    return false;
+  }
+
+  if (currentPhase === 'complete') {
+    return true;
+  }
+
+  return currentIndex >= targetIndex;
 }
 
 function BattlePartyDots({ team, align = 'left', compact = false }) {

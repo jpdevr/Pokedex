@@ -48,9 +48,9 @@ const MENU_TRACKS = [menu1Sfx, menu2Sfx, menu3Sfx];
 const BATTLE_TRACKS = [battle1Sfx, battle2Sfx, battle3Sfx, battle4Sfx];
 const BATTLE_LAUNCH_STRIPE_COUNT = 9;
 const BATTLE_LAUNCH_TIMINGS = {
-  stripes: 1060,
-  landing: 880,
-  opening: 760,
+  stripes: 1300,
+  landing: 1080,
+  opening: 940,
 };
 const BATTLE_CLOSE_FADE_DURATION = 420;
 const audioSettings = {
@@ -446,14 +446,6 @@ function App() {
   }, [selectedPokemon, selectedPokemonDetailState?.status]);
 
   useEffect(() => {
-    if (selectedPokemonDetailState?.status !== 'success') {
-      return;
-    }
-
-    playPokemonCry(selectedPokemonDetailState.data.cryUrl);
-  }, [selectedPokemonDetailState]);
-
-  useEffect(() => {
     setIsQuickAddOpen(false);
   }, [selectedPokemonId]);
 
@@ -560,12 +552,12 @@ function App() {
     setSelectedTeamId(nextSelectedId);
   }
 
-  function handleAddSelectedPokemonToTeam(teamId) {
+  function handleAddSelectedPokemonToTeam(teamId, selectedVariant = null) {
     if (!selectedPokemon) {
       return;
     }
 
-    const member = buildTeamMemberSnapshot(selectedPokemon, selectedPokemonDetailState, currentGeneration);
+    const member = buildTeamMemberSnapshot(selectedPokemon, selectedPokemonDetailState, currentGeneration, selectedVariant);
 
     setTeams((current) =>
       current.map((team) => {
@@ -882,9 +874,9 @@ function App() {
                   playButtonSfx();
                   setIsQuickAddOpen((current) => !current);
                 }}
-                onAddToTeam={(teamId) => {
+                onAddToTeam={(teamId, activeVariant) => {
                   playButtonSfx();
-                  handleAddSelectedPokemonToTeam(teamId);
+                  handleAddSelectedPokemonToTeam(teamId, activeVariant);
                 }}
                 onCreateTeam={() => {
                   playButtonSfx();
@@ -1388,6 +1380,44 @@ function PokedexDetailPanel({
   onCreateTeam,
 }) {
   const detail = detailState?.status === 'success' ? detailState.data : null;
+  const [activeVariantId, setActiveVariantId] = useState(null);
+  const [spriteMode, setSpriteMode] = useState('normal');
+  const activeVariant = detail?.variants?.find((variant) => variant.id === activeVariantId) ?? detail?.variants?.[0] ?? null;
+  const visibleTypes = activeVariant?.types ?? detail?.types ?? [];
+  const visibleAbilities = activeVariant?.abilities ?? detail?.abilities ?? [];
+  const visibleHeight = activeVariant?.heightLabel ?? detail?.heightLabel ?? '--';
+  const visibleWeight = activeVariant?.weightLabel ?? detail?.weightLabel ?? '--';
+  const visibleImage =
+    spriteMode === 'shiny'
+      ? activeVariant?.shinyImage ?? activeVariant?.image ?? detail?.shinyImage ?? detail?.image ?? ''
+      : activeVariant?.image ?? activeVariant?.shinyImage ?? detail?.image ?? detail?.shinyImage ?? '';
+  const visibleDisplayName = activeVariant?.displayName ?? detail?.displayName ?? pokemon?.displayName ?? '';
+  const availableVariants = detail?.variants ?? [];
+
+  useEffect(() => {
+    if (!detail?.variants?.length) {
+      setActiveVariantId(null);
+      return;
+    }
+
+    setActiveVariantId((current) => {
+      if (current && detail.variants.some((variant) => variant.id === current)) {
+        return current;
+      }
+
+      return detail.variants[0].id;
+    });
+  }, [detail]);
+
+  useEffect(() => {
+    setSpriteMode('normal');
+  }, [pokemon?.id]);
+
+  useEffect(() => {
+    if (activeVariant?.cryUrl) {
+      playPokemonCry(activeVariant.cryUrl);
+    }
+  }, [activeVariant?.cryUrl]);
 
   if (!pokemon) {
     return (
@@ -1419,7 +1449,7 @@ function PokedexDetailPanel({
                     key={team.id}
                     type="button"
                     className="detail-add-option"
-                    onClick={() => onAddToTeam(team.id)}
+                    onClick={() => onAddToTeam(team.id, activeVariant)}
                     disabled={isFull}
                   >
                     <span>{team.name}</span>
@@ -1434,14 +1464,19 @@ function PokedexDetailPanel({
           </div>
         ) : null}
       </div>
-      <h2>{detail?.displayName ?? pokemon.displayName}</h2>
+      <h2>{visibleDisplayName}</h2>
       <p className="detail-flavor">
         {detail?.flavor ?? 'Buscando descricao completa e registros da Pokedex...'}
       </p>
 
       <div className="detail-hero">
-        {detail?.image ? (
-          <img src={detail.image} alt={detail.name} className="pixel-art detail-sprite" />
+        {visibleImage ? (
+          <img
+            key={activeVariant?.id ?? `${pokemon.id}-base`}
+            src={visibleImage}
+            alt={visibleDisplayName}
+            className="pixel-art detail-sprite detail-sprite-rotating"
+          />
         ) : (
           <div className="detail-sprite-placeholder" />
         )}
@@ -1452,25 +1487,59 @@ function PokedexDetailPanel({
           </div>
           <div>
             <span>Altura</span>
-            <strong>{detail?.heightLabel ?? '--'}</strong>
+            <strong>{visibleHeight}</strong>
           </div>
           <div>
             <span>Peso</span>
-            <strong>{detail?.weightLabel ?? '--'}</strong>
+            <strong>{visibleWeight}</strong>
           </div>
         </div>
 
         <div className="detail-abilities">
           <span>Habilidades</span>
-          <strong>{detail?.abilities?.join(', ') ?? 'Carregando...'}</strong>
+          <strong>{visibleAbilities.join(', ') || 'Carregando...'}</strong>
+          <div className="detail-abilities-controls">
+            <VariantSwitch
+              variants={[
+                { id: 'normal', label: 'Normal' },
+                { id: 'shiny', label: 'Shiny' },
+              ]}
+              activeVariantId={spriteMode}
+              onSelect={setSpriteMode}
+            />
+            {availableVariants.length > 1 ? (
+              <VariantSwitch
+                variants={availableVariants}
+                activeVariantId={activeVariant?.id ?? null}
+                onSelect={setActiveVariantId}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
       <div className="detail-types">
-        {(detail?.types ?? []).map((type) => (
+        {visibleTypes.map((type) => (
           <TypeBadge key={type} type={type} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function VariantSwitch({ variants, activeVariantId, onSelect }) {
+  return (
+    <div className="detail-variant-list">
+      {variants.map((variant) => (
+        <button
+          key={variant.id}
+          type="button"
+          className={variant.id === activeVariantId ? 'detail-variant-chip active' : 'detail-variant-chip'}
+          onClick={() => onSelect(variant.id)}
+        >
+          {variant.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1814,23 +1883,44 @@ async function fetchPokemonDetails(id) {
         fetchJsonWithTimeout(`${API_BASE}/pokemon/${id}`, `pokemon ${id}`),
         fetchJsonWithTimeout(`${API_BASE}/pokemon-species/${id}`, `pokemon species ${id}`),
       ])
-        .then(([pokemon, species]) => {
+        .then(async ([pokemon, species]) => {
           const flavor =
             species.flavor_text_entries.find((entry) => entry.language.name === 'en')
               ?.flavor_text ?? 'No description available.';
           const cleanFlavor = cleanText(flavor);
+          const varietyResults = await Promise.allSettled(
+            species.varieties.map((entry) =>
+              fetchJsonWithTimeout(entry.pokemon.url, `pokemon variety ${entry.pokemon.name}`),
+            ),
+          );
+          const variants = varietyResults
+            .filter((result) => result.status === 'fulfilled')
+            .map((result) => buildPokemonVariantSummary(result.value, species.name))
+            .sort((left, right) => {
+              if (left.isDefault !== right.isDefault) {
+                return left.isDefault ? -1 : 1;
+              }
+
+              if (left.group !== right.group) {
+                return left.group === 'forms' ? -1 : 1;
+              }
+
+              return left.sortLabel.localeCompare(right.sortLabel);
+            });
 
           return {
             id: pokemon.id,
             name: pokemon.name,
             displayName: formatName(pokemon.name),
             image: getAnimatedPixelSprite(pokemon),
+            shinyImage: getAnimatedPixelSprite(pokemon, { shiny: true }),
             cryUrl: pokemon.cries?.legacy ?? pokemon.cries?.latest ?? null,
             types: pokemon.types.map((item) => item.type.name),
             abilities: pokemon.abilities.map((item) => formatName(item.ability.name)),
             heightLabel: `${(pokemon.height / 10).toFixed(1)} m`,
             weightLabel: `${(pokemon.weight / 10).toFixed(1)} kg`,
             flavor: cleanFlavor,
+            variants,
           };
         })
         .catch((error) => {
@@ -1841,6 +1931,78 @@ async function fetchPokemonDetails(id) {
   }
 
   return pokemonDetailRequestCache.get(id);
+}
+
+function buildPokemonVariantSummary(pokemon, speciesName) {
+  const variantMeta = describePokemonVariant(pokemon.name, speciesName);
+
+  return {
+    id: pokemon.name,
+    identifier: pokemon.name,
+    name: pokemon.name,
+    displayName: formatName(pokemon.name),
+    label: variantMeta.label,
+    sortLabel: variantMeta.sortLabel,
+    isDefault: pokemon.is_default,
+    group: variantMeta.group,
+    image: getAnimatedPixelSprite(pokemon),
+    shinyImage: getAnimatedPixelSprite(pokemon, { shiny: true }),
+    cryUrl: pokemon.cries?.legacy ?? pokemon.cries?.latest ?? null,
+    types: pokemon.types.map((item) => item.type.name),
+    abilities: pokemon.abilities.map((item) => formatName(item.ability.name)),
+    heightLabel: `${(pokemon.height / 10).toFixed(1)} m`,
+    weightLabel: `${(pokemon.weight / 10).toFixed(1)} kg`,
+  };
+}
+
+function describePokemonVariant(pokemonName, speciesName) {
+  const suffix = pokemonName === speciesName
+    ? ''
+    : pokemonName.startsWith(`${speciesName}-`)
+      ? pokemonName.slice(speciesName.length + 1)
+      : pokemonName;
+  const parts = suffix ? suffix.split('-') : [];
+
+  if (!parts.length) {
+    return {
+      label: 'Base',
+      sortLabel: '000-base',
+      group: 'forms',
+    };
+  }
+
+  if (parts.includes('mega')) {
+    const megaIndex = parts.indexOf('mega');
+    const megaSuffix = parts[megaIndex + 1];
+
+    return {
+      label: megaSuffix ? `Mega ${megaSuffix.toUpperCase()}` : 'Mega',
+      sortLabel: `200-mega-${suffix}`,
+      group: 'special',
+    };
+  }
+
+  if (parts.includes('gmax')) {
+    return {
+      label: 'Gigantamax',
+      sortLabel: `210-gmax-${suffix}`,
+      group: 'special',
+    };
+  }
+
+  if (parts.includes('totem')) {
+    return {
+      label: 'Totem',
+      sortLabel: `220-totem-${suffix}`,
+      group: 'special',
+    };
+  }
+
+  return {
+    label: formatName(suffix),
+    sortLabel: `100-form-${suffix}`,
+    group: 'forms',
+  };
 }
 
 function mapPokeballItem(item, index) {
@@ -1945,16 +2107,17 @@ function pickNextBattleTrackIndex(trackCount, previousIndex) {
   return nextIndex;
 }
 
-function buildTeamMemberSnapshot(pokemon, detailState, currentGeneration) {
+function buildTeamMemberSnapshot(pokemon, detailState, currentGeneration, selectedVariant = null) {
   const detail = detailState?.status === 'success' ? detailState.data : null;
+  const activeVariant = selectedVariant ?? detail?.variants?.[0] ?? null;
 
   return {
     id: `${pokemon.id}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
-    pokemonId: pokemon.id,
-    name: pokemon.name,
-    displayName: detail?.displayName ?? pokemon.displayName,
-    sprite: detail?.image ?? getCardSprite(pokemon.id),
-    types: detail?.types ?? [],
+    pokemonId: activeVariant?.identifier ?? pokemon.id,
+    name: activeVariant?.name ?? pokemon.name,
+    displayName: activeVariant?.displayName ?? detail?.displayName ?? pokemon.displayName,
+    sprite: activeVariant?.image ?? detail?.image ?? getCardSprite(pokemon.id),
+    types: activeVariant?.types ?? detail?.types ?? [],
     generationLabel: currentGeneration?.generationLabel ?? currentGeneration?.label ?? 'Dex',
   };
 }
