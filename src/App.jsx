@@ -53,6 +53,28 @@ const BATTLE_LAUNCH_TIMINGS = {
   opening: 940,
 };
 const BATTLE_CLOSE_FADE_DURATION = 420;
+const regionMapModules = import.meta.glob('./regions/*.{png,jpg,jpeg}', { eager: true, import: 'default' });
+
+function buildRegionMaps(modules) {
+  return Object.entries(modules)
+    .map(([filePath, src]) => {
+      const fileName = filePath.split('/').pop() || filePath;
+      const label = fileName
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[-_]/g, ' ')
+        .split(' ')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+
+      return {
+        id: fileName,
+        label,
+        src,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 const audioSettings = {
   muted: false,
   volume: 0.6,
@@ -127,6 +149,8 @@ function App() {
   const [bagShake, setBagShake] = useState({ tick: 0, direction: 'right' });
   const [detailLightActive, setDetailLightActive] = useState(false);
   const [mapPopupPhase, setMapPopupPhase] = useState('closed');
+  const [selectedMapIndex, setSelectedMapIndex] = useState(0);
+  const [mapPendingIndex, setMapPendingIndex] = useState(null);
   const [isTeamBuilderOpen, setIsTeamBuilderOpen] = useState(false);
   const [teams, setTeams] = useState(INITIAL_TEAMS);
   const [selectedTeamId, setSelectedTeamId] = useState(INITIAL_TEAMS[0].id);
@@ -425,6 +449,20 @@ function App() {
     activeBagDataState.data[0] ??
     null;
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0] ?? null;
+  const regionMaps = useMemo(() => buildRegionMaps(regionMapModules), []);
+  const currentMap = regionMaps[selectedMapIndex] ?? null;
+  const hasPreviousMap = regionMaps.length > 1;
+  const hasNextMap = regionMaps.length > 1;
+
+  useEffect(() => {
+    if (mapPopupPhase !== 'closed' || mapPendingIndex === null) {
+      return;
+    }
+
+    setSelectedMapIndex(mapPendingIndex);
+    setMapPendingIndex(null);
+    setMapPopupPhase('opening');
+  }, [mapPopupPhase, mapPendingIndex]);
 
   useEffect(() => {
     if (!filteredPokemon.length) {
@@ -477,6 +515,25 @@ function App() {
 
       return BAG_MENUS[nextIndex].id;
     });
+  }
+
+  function handleMapChange(direction) {
+    if (!regionMaps.length) {
+      return;
+    }
+
+    const nextIndex =
+      (selectedMapIndex + (direction === 'next' ? 1 : -1) + regionMaps.length) % regionMaps.length;
+
+    setMapPendingIndex(nextIndex);
+
+    if (mapPopupPhase === 'open') {
+      setMapPopupPhase('closing');
+      return;
+    }
+
+    setSelectedMapIndex(nextIndex);
+    setMapPopupPhase('opening');
   }
 
   function triggerDetailLight() {
@@ -1073,11 +1130,24 @@ function App() {
       {mapPopupPhase !== 'closed' ? (
         <WorldMapPopup
           phase={mapPopupPhase}
+          map={currentMap}
+          mapLabel={currentMap?.label ?? 'Mapa do mundo'}
+          hasPrevious={hasPreviousMap}
+          hasNext={hasNextMap}
           onOpenComplete={() => setMapPopupPhase('open')}
           onCloseComplete={() => setMapPopupPhase('closed')}
           onRequestClose={() => {
             playButtonSfx();
+            setMapPendingIndex(null);
             setMapPopupPhase('closing');
+          }}
+          onPrevious={() => {
+            playButtonSfx();
+            handleMapChange('previous');
+          }}
+          onNext={() => {
+            playButtonSfx();
+            handleMapChange('next');
           }}
         />
       ) : null}
@@ -1139,7 +1209,18 @@ function WorldMapButton({ onClick }) {
   );
 }
 
-function WorldMapPopup({ phase, onOpenComplete, onCloseComplete, onRequestClose }) {
+function WorldMapPopup({
+  phase,
+  map,
+  mapLabel,
+  hasPrevious,
+  hasNext,
+  onPrevious,
+  onNext,
+  onOpenComplete,
+  onCloseComplete,
+  onRequestClose,
+}) {
   useEffect(() => {
     const duration = phase === 'opening' ? 740 : phase === 'closing' ? 460 : 0;
 
@@ -1187,12 +1268,46 @@ function WorldMapPopup({ phase, onOpenComplete, onCloseComplete, onRequestClose 
           x
         </button>
 
+        <div className="map-popup-actions">
+          <button
+            type="button"
+            className="map-popup-nav"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPrevious();
+            }}
+            disabled={!hasPrevious}
+          >
+            {'<'}
+          </button>
+          <span className="map-popup-title">{mapLabel}</span>
+          <button
+            type="button"
+            className="map-popup-nav"
+            onClick={(event) => {
+              event.stopPropagation();
+              onNext();
+            }}
+            disabled={!hasNext}
+          >
+            {'>'}
+          </button>
+        </div>
+
         <div className="map-popup-shell">
           <div className="map-popup-half map-popup-half-left" aria-hidden="true">
             <img src={mapOpenLeftSprite} alt="" className="pixel-art" />
           </div>
 
-          <div className="map-popup-center" />
+          <div className="map-popup-center">
+            {map ? (
+              <div className="map-popup-map">
+                <img src={map.src} alt={mapLabel} className="map-popup-map-image pixel-art" />
+              </div>
+            ) : (
+              <div className="map-popup-empty">Nenhum mapa disponível</div>
+            )}
+          </div>
 
           <div className="map-popup-half map-popup-half-right" aria-hidden="true">
             <img src={mapOpenRightSprite} alt="" className="pixel-art" />

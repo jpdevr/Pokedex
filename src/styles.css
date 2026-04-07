@@ -1147,7 +1147,6 @@ img {
 .map-popup-layer {
   position: fixed;
   inset: 0;
-  z-index: 24;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -1155,7 +1154,12 @@ img {
   backdrop-filter: blur(3px);
 }
 
+.map-popup-layer {
+  z-index: 50;
+}
+
 .bag-popup-layer {
+  z-index: 48;
   padding-right: 240px;
 }
 
@@ -1181,9 +1185,44 @@ img {
   place-items: center;
   border: 0;
   color: #fff6e5;
-  background: linear-gradient(180deg, #ffb14c 0%, #f28c17 100%);
+  background: var(--surface-red);
   border-radius: 999px;
   box-shadow: none;
+}
+
+.map-popup-close {
+  position: absolute;
+  top: 12px;
+  right: -56px;
+  width: 42px;
+  height: 42px;
+  z-index: 10;
+}
+
+.map-popup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 14px;
+}
+
+.map-popup-nav {
+  min-width: 54px;
+  height: 54px;
+  font-size: 1.2rem;
+  border: 2px solid #8d4b00;
+}
+
+.map-popup-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  text-align: center;
+  color: #2d2d2d;
+  background: rgba(255,255,255,0.85);
+  border-radius: 999px;
+  padding: 10px 14px;
 }
 
 .bag-nav-button {
@@ -1469,13 +1508,16 @@ img {
 .map-popup {
   position: relative;
   overflow: visible;
+  margin-top: -80px;
 }
 
 .map-popup-shell {
   display: grid;
-  grid-template-columns: 240px minmax(220px, 1fr) 240px;
+  grid-template-columns: 56px minmax(380px, 1fr) 56px;
+  justify-items: center;
   align-items: center;
   transform-origin: center center;
+  gap: -40px;
 }
 
 .map-popup-half {
@@ -1485,22 +1527,26 @@ img {
 }
 
 .map-popup-half-left {
-  transform-origin: right center;
+  transform-origin: center center;
 }
 
 .map-popup-half-right {
-  transform-origin: left center;
+  transform-origin: center center;
 }
 
 .map-popup-half img {
   width: 100%;
+  max-width: 68px;
   image-rendering: pixelated;
 }
 
 .map-popup-center {
   position: relative;
   z-index: 1;
-  min-height: 420px;
+  min-height: 480px;
+  padding: 8px 12px;
+  display: grid;
+  place-items: center;
   background:
     linear-gradient(180deg, rgba(241, 247, 219, 0.94) 0%, rgba(191, 209, 131, 0.92) 100%);
   border: 3px solid rgba(86, 91, 44, 0.7);
@@ -1508,6 +1554,32 @@ img {
   transform: scaleX(0.82);
   transform-origin: center center;
   will-change: transform, opacity;
+}
+
+.map-popup-map {
+  width: 100%;
+  max-width: 760px;
+  max-height: min(64vh, 520px);
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.map-popup-map-image {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  max-height: 520px;
+}
+
+.map-popup-empty {
+  color: #5b4c44;
+  font-size: 0.95rem;
+  text-align: center;
+  padding: 22px;
 }
 
 .map-popup-opening .map-popup-half-left {
@@ -1523,11 +1595,11 @@ img {
 }
 
 .map-popup-open .map-popup-half-left {
-  transform: translateX(-110px);
+  transform: translateX(-20px);
 }
 
 .map-popup-open .map-popup-half-right {
-  transform: translateX(110px);
+  transform: translateX(20px);
 }
 
 .map-popup-open .map-popup-center {
@@ -3321,7 +3393,7 @@ img {
     transform: translateX(0);
   }
   100% {
-    transform: translateX(-110px);
+    transform: translateX(-20px);
   }
 }
 
@@ -3330,7 +3402,7 @@ img {
     transform: translateX(0);
   }
   100% {
-    transform: translateX(110px);
+    transform: translateX(20px);
   }
 }
 
@@ -3350,7 +3422,7 @@ img {
 
 @keyframes mapDoorLeftClose {
   0% {
-    transform: translateX(-110px);
+    transform: translateX(-20px);
   }
   100% {
     transform: translateX(0);
@@ -3359,7 +3431,7 @@ img {
 
 @keyframes mapDoorRightClose {
   0% {
-    transform: translateX(110px);
+    transform: translateX(20px);
   }
   100% {
     transform: translateX(0);
