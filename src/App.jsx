@@ -8,12 +8,11 @@ import battle2Sfx from './SFX/Battle2SFX.ogg';
 import battle3Sfx from './SFX/Battle3SFX.ogg';
 import battle4Sfx from './SFX/Battle4SFX.ogg';
 import buttonSfx from './SFX/ButtonSFX.ogg';
+import InteractiveRegionMapPopup from './InteractiveRegionMapPopup';
 import menu1Sfx from './SFX/Menu1SFX.ogg';
 import menu2Sfx from './SFX/Menu2SFX.ogg';
 import menu3Sfx from './SFX/Menu3SFX.ogg';
 import mapCloseSprite from './assets/MapClose.png';
-import mapOpenLeftSprite from './assets/MapOpenleft.png';
-import mapOpenRightSprite from './assets/MapOpenright.png';
 import pokeballCloseSprite from './assets/PokeballClose.png';
 import pokeballOpenSprite from './assets/PokeballOpen.png';
 import pokeballSemiOpenSprite from './assets/PokeballSemiOpen.png';
@@ -29,6 +28,7 @@ import {
   getStaticCardSprite,
 } from './pokemonHelpers';
 import { fetchJsonWithTimeout } from './pokeApi';
+import { buildRegionMaps } from './regionMapData';
 import { TYPE_COLORS } from './typeData';
 
 const API_BASE = 'https://pokeapi.co/api/v2';
@@ -54,26 +54,6 @@ const BATTLE_LAUNCH_TIMINGS = {
 };
 const BATTLE_CLOSE_FADE_DURATION = 420;
 const regionMapModules = import.meta.glob('./regions/*.{png,jpg,jpeg}', { eager: true, import: 'default' });
-
-function buildRegionMaps(modules) {
-  return Object.entries(modules)
-    .map(([filePath, src]) => {
-      const fileName = filePath.split('/').pop() || filePath;
-      const label = fileName
-        .replace(/\.[^/.]+$/, '')
-        .replace(/[-_]/g, ' ')
-        .split(' ')
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
-
-      return {
-        id: fileName,
-        label,
-        src,
-      };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label));
-}
 
 const audioSettings = {
   muted: false,
@@ -1128,7 +1108,7 @@ function App() {
       ) : null}
 
       {mapPopupPhase !== 'closed' ? (
-        <WorldMapPopup
+        <InteractiveRegionMapPopup
           phase={mapPopupPhase}
           map={currentMap}
           mapLabel={currentMap?.label ?? 'Mapa do mundo'}
