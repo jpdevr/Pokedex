@@ -2030,8 +2030,10 @@ img {
   height: 112px;
   margin: 0;
   accent-color: #cf1f27;
-  writing-mode: bt-lr;
-  -webkit-appearance: slider-vertical;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  appearance: auto;
+  -webkit-appearance: auto;
 }
 
 .team-builder-layer {

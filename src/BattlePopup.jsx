@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import pokeballClose from './assets/PokeballClose.png';
 import pokeballOpen from './assets/PokeballOpen.png';
 import pokeballSemiOpen from './assets/PokeballSemiOpen.png';
+import { toSafeAudioUrl } from './audioUtils';
 import { championSprites } from './championSprites';
 import { capitalize } from './pokemonHelpers';
 import { TYPE_COLORS, getTypeMultiplier } from './typeData';
@@ -999,7 +1000,12 @@ function cloneMember(member) {
 }
 
 function playCry(url, cryAudioRef) {
-  if (!url || typeof Audio === 'undefined') {
+  if (typeof Audio === 'undefined') {
+    return;
+  }
+
+  const safeUrl = toSafeAudioUrl(url);
+  if (!safeUrl) {
     return;
   }
 
@@ -1007,7 +1013,13 @@ function playCry(url, cryAudioRef) {
     cryAudioRef.current.pause();
   }
 
-  const audio = new Audio(url);
+  let audio;
+  try {
+    audio = new Audio(safeUrl);
+  } catch {
+    return;
+  }
+
   audio.volume = 0.42;
   audio.play().catch(() => {});
   cryAudioRef.current = audio;

@@ -17,6 +17,7 @@ import pokeballCloseSprite from './assets/PokeballClose.png';
 import pokeballOpenSprite from './assets/PokeballOpen.png';
 import pokeballSemiOpenSprite from './assets/PokeballSemiOpen.png';
 import { buildBattleSetup } from './battleUtils';
+import { toSafeAudioUrl } from './audioUtils';
 import {
   capitalize,
   cleanText,
@@ -197,10 +198,21 @@ function App() {
       audioMode === 'battle'
         ? BATTLE_TRACKS[battleTrackIndex]
         : MENU_TRACKS[menuTrackIndex];
-    const ambientAudio = new Audio(trackSource);
+    const safeTrackSource = toSafeAudioUrl(trackSource);
+    if (!safeTrackSource) {
+      return undefined;
+    }
+
+    let ambientAudio;
+    try {
+      ambientAudio = new Audio(safeTrackSource);
+    } catch {
+      return undefined;
+    }
+
     ambientAudioRef.current = ambientAudio;
     ambientAudio.loop = audioMode === 'battle';
-    ambientAudio.preload = 'auto';
+    ambientAudio.preload = 'metadata';
     ambientAudio.volume = audioMode === 'battle' ? getBattleMusicVolume() : getAmbientVolume();
 
     function playAmbient() {
@@ -214,9 +226,19 @@ function App() {
       }
     }
 
+    function handleError() {
+      if (audioMode === 'battle') {
+        setBattleTrackIndex((current) => pickNextBattleTrackIndex(BATTLE_TRACKS.length, current));
+        return;
+      }
+
+      setMenuTrackIndex((current) => (current + 1) % MENU_TRACKS.length);
+    }
+
     if (audioMode === 'menu') {
       ambientAudio.addEventListener('ended', handleEnded);
     }
+    ambientAudio.addEventListener('error', handleError);
     playAmbient();
 
     window.addEventListener('pointerdown', playAmbient);
@@ -225,6 +247,7 @@ function App() {
     return () => {
       ambientAudio.pause();
       ambientAudio.removeEventListener('ended', handleEnded);
+      ambientAudio.removeEventListener('error', handleError);
       window.removeEventListener('pointerdown', playAmbient);
       window.removeEventListener('keydown', playAmbient);
 
@@ -1189,115 +1212,6 @@ function WorldMapButton({ onClick }) {
   );
 }
 
-function WorldMapPopup({
-  phase,
-  map,
-  mapLabel,
-  hasPrevious,
-  hasNext,
-  onPrevious,
-  onNext,
-  onOpenComplete,
-  onCloseComplete,
-  onRequestClose,
-}) {
-  useEffect(() => {
-    const duration = phase === 'opening' ? 740 : phase === 'closing' ? 460 : 0;
-
-    if (!duration) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      if (phase === 'opening') {
-        onOpenComplete();
-      } else {
-        onCloseComplete();
-      }
-    }, duration);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [onCloseComplete, onOpenComplete, phase]);
-
-  useEffect(() => {
-    function handleEscape(event) {
-      if (event.key === 'Escape') {
-        onRequestClose();
-      }
-    }
-
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [onRequestClose]);
-
-  return (
-    <div className="map-popup-layer" role="presentation" onClick={onRequestClose}>
-      <div
-        className={`map-popup map-popup-${phase}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Mapa do mundo Pokemon"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          className="map-popup-close"
-          onClick={onRequestClose}
-          aria-label="Fechar mapa"
-        >
-          x
-        </button>
-
-        <div className="map-popup-actions">
-          <button
-            type="button"
-            className="map-popup-nav"
-            onClick={(event) => {
-              event.stopPropagation();
-              onPrevious();
-            }}
-            disabled={!hasPrevious}
-          >
-            {'<'}
-          </button>
-          <span className="map-popup-title">{mapLabel}</span>
-          <button
-            type="button"
-            className="map-popup-nav"
-            onClick={(event) => {
-              event.stopPropagation();
-              onNext();
-            }}
-            disabled={!hasNext}
-          >
-            {'>'}
-          </button>
-        </div>
-
-        <div className="map-popup-shell">
-          <div className="map-popup-half map-popup-half-left" aria-hidden="true">
-            <img src={mapOpenLeftSprite} alt="" className="pixel-art" />
-          </div>
-
-          <div className="map-popup-center">
-            {map ? (
-              <div className="map-popup-map">
-                <img src={map.src} alt={mapLabel} className="map-popup-map-image pixel-art" />
-              </div>
-            ) : (
-              <div className="map-popup-empty">Nenhum mapa disponível</div>
-            )}
-          </div>
-
-          <div className="map-popup-half map-popup-half-right" aria-hidden="true">
-            <img src={mapOpenRightSprite} alt="" className="pixel-art" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function BagPopup({
   activeMenu,
   inventoryState,
@@ -2141,11 +2055,22 @@ function mapInventoryItem(item, index) {
 }
 
 function playPokemonCry(url) {
-  if (!url || typeof Audio === 'undefined') {
+  if (typeof Audio === 'undefined') {
     return;
   }
 
-  const audio = new Audio(url);
+  const safeUrl = toSafeAudioUrl(url);
+  if (!safeUrl) {
+    return;
+  }
+
+  let audio;
+  try {
+    audio = new Audio(safeUrl);
+  } catch {
+    return;
+  }
+
   audio.volume = getEffectVolume(0.8);
   audio.play().catch(() => {});
 }
